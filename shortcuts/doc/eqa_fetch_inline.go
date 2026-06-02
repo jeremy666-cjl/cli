@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/larksuite/cli/internal/eqafetch"
 	"github.com/larksuite/cli/internal/faasbridge"
 	"github.com/larksuite/cli/shortcuts/common"
 )
@@ -31,8 +32,8 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 		return inlineFallback(runtime, "identity", ierr)
 	}
 
-	req := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
-	resp, ferr := fetchKnowledgeQA(ctx, client, ident, req)
+	req := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
+	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
 		return inlineFallback(runtime, "eqa-call", ferr)
 	}
@@ -44,8 +45,8 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 			fmt.Errorf("status %d: %s", resp.BaseResp.StatusCode, resp.BaseResp.StatusMessage))
 	}
 
-	md := renderImages(resp.FullContent, resp.QAImageMetaMap, parseImageMode(runtime.Str("image-urls")))
-	md = truncateGFMTables(md, runtime.Int("embed-max-rows"))
+	md := eqafetch.RenderImages(resp.FullContent, resp.QAImageMetaMap, eqafetch.ParseImageMode(runtime.Str("image-urls")))
+	md = eqafetch.TruncateGFMTables(md, runtime.Int("embed-max-rows"))
 
 	emitInlineEmbeds(runtime, resp, md)
 	return true, nil
@@ -64,7 +65,7 @@ func inlineFallback(runtime *common.RuntimeContext, stage string, cause error) (
 // {document:{content,...}} envelope as the native v2 path so --format json
 // consumers see an analogous structure. The "source" discriminator marks the qa
 // path so callers can tell which route produced the content.
-func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqaFetchResponse, md string) {
+func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqafetch.Response, md string) {
 	data := map[string]interface{}{
 		"document": map[string]interface{}{
 			"content":     md,
@@ -80,9 +81,9 @@ func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqaFetchResponse, md
 
 // dryRunInlineEmbeds describes the faas fetch call for --dry-run.
 func dryRunInlineEmbeds(runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
+	body := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
 	return common.NewDryRunAPI().
-		POST(faasbridge.BaseURL()+eqaFetchPath).
+		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch document (materialized markdown)").
 		Body(body).
 		Set("image_urls", runtime.Str("image-urls")).

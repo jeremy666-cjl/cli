@@ -38,6 +38,7 @@ metadata:
 
 | 你要做的事 | ✅ 正确写法 | ❌ 不存在（会被 cobra 拒） |
 | --- | --- | --- |
+| 读整张表为可读 markdown 正文（喂模型 / 总结 / 阅读） | `+fetch`（走 qa fetch，URL 带 `?sheet=` 自动选对应子表；qa 不可用时报错并提示改用 `+csv-get` / `+cells-get`） | — |
 | 读数据（纯值 / CSV） | `+csv-get`（范围用 `--range`） | — |
 | 读值 + 公式 / 样式 / 批注 | `+cells-get --include value,formula,style,comment,data_validation` | `--with-styles`、`--with-merges`、`--include-merged-cells` |
 | 写纯值（整块 CSV 平铺） | `+csv-put`（定位用 `--start-cell`，单个左上角锚点格；也接受 `--range` 别名，区间自动取左上角） | — |
@@ -74,6 +75,7 @@ metadata:
 | [Lark Sheet Workbook](references/lark-sheets-workbook.md) | 管理飞书表格的工作簿结构（子表列表及元数据）。当用户提到"看看这个表格有什么"、"表格结构"、"有哪些 sheet"、"新建一个 sheet"、"删除这个工作表"、"重命名"、"复制一份"、"移动到前面"时使用。仅针对飞书表格。 |
 | [Lark Sheet Sheet Structure](references/lark-sheets-sheet-structure.md) | 管理飞书表格的子表结构与布局。适用场景：查看行高、列宽、隐藏行列、合并单元格等布局信息，以及"插入一行"、"删除这列"、"隐藏行"、"冻结表头"、行列分组（大纲折叠/展开）等操作。行列大纲仅在用户明确提到"行分组"、"列分组"、"大纲"、"outline"时才触发，"按XXX分组"等数据分组场景请使用 lark-sheets-pivot-table。如需在表尾追加数据，应先通过此 skill 插入行，再通过 lark-sheets-write-cells 写入。仅针对飞书表格。 |
 | [Lark Sheet Read Data](references/lark-sheets-read-data.md) | 读取飞书表格中的单元格数据。当用户需要"看看数据"、"分析数据"、"统计/汇总"时使用；也适用于需要查看公式、样式、批注等详细信息的场景。仅针对飞书表格。 |
+| [Lark Sheet Fetch](references/lark-sheets-fetch.md) | 把整张表读成一串可读 markdown 正文（文档名 + 各子表名 + 子表内容展开成的 GFM 表格），供喂模型 / 总结 / 阅读。走 qa fetch；要某区间的裸二维数组仍用 read-data 的 `+csv-get` / `+cells-get`。仅针对飞书表格。 |
 | [Lark Sheet Search & Replace](references/lark-sheets-search-replace.md) | 在飞书表格中搜索和替换文本，支持限定范围、大小写匹配、精确匹配、正则表达式。当用户需要"查找"、"搜索"、"定位"某个值，或"替换"、"批量修改文本"、"把 A 改成 B"时使用。不要用于理解表格结构（应读取数据）、不要用于数据分析（应读取数据后计算）、不要把用户操作动作中的关键词（如"汇总金额""统计数量"）当作搜索词。仅针对飞书表格。 |
 | [Lark Sheet Write Cells](references/lark-sheets-write-cells.md) | 向飞书表格的指定区域批量写入值、公式、样式、批注或单元格图片。适用场景：填写数据、设置公式、修改格式、添加批注、嵌入单元格图片（如需操作浮动图片，请使用 lark-sheets-float-image）；若只需把一块 CSV 纯值批量铺到表格上（不带公式/样式），直接使用 `+csv-put` 更短更快。追加数据需先通过 lark-sheets-sheet-structure 插入行列。仅针对飞书表格。 |
 | [Lark Sheet Range Operations](references/lark-sheets-range-operations.md) | 对飞书表格中指定区域执行结构性操作（不涉及写入单元格数据值）。适用场景：清除内容或格式（"清空"、"删除内容"、"去掉格式"）、合并/取消合并单元格、调整行高列宽（"加宽列"、"自适应列宽"）、移动/复制/填充/排序数据（"移动数据"、"复制到"、"自动填充"、"按某列排序"）。写入单元格数据请使用 lark-sheets-write-cells。仅针对飞书表格。 |

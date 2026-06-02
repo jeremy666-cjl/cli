@@ -51,6 +51,7 @@ func shortcutList() []common.Shortcut {
 		DimGroup,
 		DimUngroup,
 		DimMove,
+		SheetFetch,
 
 		// lark_sheet_read_data
 		CellsGet,
