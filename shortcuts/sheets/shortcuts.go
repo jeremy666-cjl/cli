@@ -12,6 +12,7 @@ func Shortcuts() []common.Shortcut {
 		SheetCreate,
 		SheetInfo,
 		SheetExport,
+		SheetFetch,
 
 		// Sheet management
 		SheetCreateSheet,

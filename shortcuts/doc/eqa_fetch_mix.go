@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/larksuite/cli/internal/eqafetch"
 	"github.com/larksuite/cli/internal/faasbridge"
 	"github.com/larksuite/cli/shortcuts/common"
 )
@@ -32,9 +33,9 @@ func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled b
 		return mixFallback(runtime, "identity", ierr)
 	}
 
-	req := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
+	req := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
 	req.WithBlockID = true
-	resp, ferr := fetchKnowledgeQA(ctx, client, ident, req)
+	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
 		return mixFallback(runtime, "eqa-call", ferr)
 	}
@@ -51,7 +52,7 @@ func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled b
 	}
 
 	md, rerr := renderMix(resp.ContentWithBlockID, resp.QAImageMetaMap,
-		parseImageMode(runtime.Str("image-urls")), runtime.Int("embed-max-rows"))
+		eqafetch.ParseImageMode(runtime.Str("image-urls")), runtime.Int("embed-max-rows"))
 	if rerr != nil {
 		return mixFallback(runtime, "mix-render", rerr)
 	}
@@ -75,7 +76,7 @@ func mixFallback(runtime *common.RuntimeContext, stage string, cause error) (boo
 // emitMix prints the mix markdown, wrapping it in the same {document:{...}}
 // envelope as the other fetch paths. The "source" discriminator marks the mix
 // route so callers can tell which path produced the content.
-func emitMix(runtime *common.RuntimeContext, resp *eqaFetchResponse, md string) {
+func emitMix(runtime *common.RuntimeContext, resp *eqafetch.Response, md string) {
 	data := map[string]interface{}{
 		"document": map[string]interface{}{
 			"content":     md,
@@ -91,10 +92,10 @@ func emitMix(runtime *common.RuntimeContext, resp *eqaFetchResponse, md string) 
 
 // dryRunMix describes the faas fetch call for --dry-run --doc-format mix.
 func dryRunMix(runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
+	body := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
 	body.WithBlockID = true
 	return common.NewDryRunAPI().
-		POST(faasbridge.BaseURL()+eqaFetchPath).
+		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch document (mix: materialized markdown + block-id anchors)").
 		Body(body).
 		Set("image_urls", runtime.Str("image-urls")).
@@ -111,7 +112,7 @@ var mixBlankRunRe = regexp.MustCompile(`\n{3,}`)
 // — use --inline-embeds for full expansion. Only heading / table / image / board
 // get a {#blockid} anchor; paragraphs, lists and code stay anchor-free (the
 // "shallow" of mix). Image meta and table truncation reuse the ②a post-processors.
-func renderMix(xmlContent string, metas map[string]*eqaImageMeta, mode imageURLMode, maxRows int) (string, error) {
+func renderMix(xmlContent string, metas map[string]*eqafetch.ImageMeta, mode eqafetch.ImageURLMode, maxRows int) (string, error) {
 	r := &mixRenderer{metas: metas, mode: mode}
 	// Wrap in a synthetic root so the fragment is a single well-formed document.
 	// Strict=false + the HTML auto-close / entity tables let the strict XML
@@ -125,13 +126,13 @@ func renderMix(xmlContent string, metas map[string]*eqaImageMeta, mode imageURLM
 		return "", err
 	}
 	md := mixBlankRunRe.ReplaceAllString(r.out.String(), "\n\n")
-	md = truncateGFMTables(md, maxRows)
+	md = eqafetch.TruncateGFMTables(md, maxRows)
 	return strings.TrimSpace(md) + "\n", nil
 }
 
 type mixRenderer struct {
-	metas map[string]*eqaImageMeta
-	mode  imageURLMode
+	metas map[string]*eqafetch.ImageMeta
+	mode  eqafetch.ImageURLMode
 	out   strings.Builder
 }
 
@@ -248,7 +249,7 @@ func (r *mixRenderer) renderCode(dec *xml.Decoder, start xml.StartElement) error
 
 func (r *mixRenderer) renderImg(start xml.StartElement) string {
 	token := attrOf(start, "token")
-	base := renderOneImage(token, r.metas[token], r.mode)
+	base := eqafetch.RenderOneImage(token, r.metas[token], r.mode)
 	return base + idSuffix(realID(start))
 }
 
@@ -426,7 +427,7 @@ func (r *mixRenderer) renderCellImages(s string) string {
 		if len(tok) < 2 {
 			return ""
 		}
-		return renderOneImage(tok[1], r.metas[tok[1]], r.mode)
+		return eqafetch.RenderOneImage(tok[1], r.metas[tok[1]], r.mode)
 	})
 }
 

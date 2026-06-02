@@ -14,6 +14,7 @@ metadata:
 
 ## 快速决策
 - 已知 spreadsheet URL / token 后，再进入 `sheets +info`、`sheets +read`、`sheets +find` 等对象内部操作。
+- 读**整张表为一串可读 markdown 正文**（喂模型 / 总结 / 阅读；结构为文档名 + 各子表名 + 子表内容展开成的 GFM 表格）用 [`sheets +fetch`](references/lark-sheets-fetch.md)；要**某区间的裸二维数组**用 `sheets +read`。URL 带 `?sheet=` 时 `+fetch` 自动读对应子表。
 
 ## 核心概念
 
@@ -188,6 +189,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli sheets +<verb> [flags]`�
 | [`+create`](references/lark-sheets-spreadsheet-management.md#create) | Create a spreadsheet (optional header row and initial data) |
 | [`+info`](references/lark-sheets-spreadsheet-management.md#info) | View spreadsheet metadata and sheet information |
 | [`+export`](references/lark-sheets-spreadsheet-management.md#export) | Export a spreadsheet (async task polling + optional download) |
+| [`+fetch`](references/lark-sheets-fetch.md) | Fetch a spreadsheet as one materialized markdown body (via qa fetch); read-content counterpart to `+read` |
 
 ### Sheet Management
 

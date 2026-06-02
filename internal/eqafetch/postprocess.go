@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Lark Technologies Pte. Ltd.
 // SPDX-License-Identifier: MIT
 
-package doc
+package eqafetch
 
 import (
 	"fmt"
@@ -9,25 +9,25 @@ import (
 	"strings"
 )
 
-// imageURLMode controls how eqa's <qa_image image_token="..."/> tags are
-// rendered into the materialized markdown. The zero value is imgModeOne (the
+// ImageURLMode controls how eqa's <qa_image image_token="..."/> tags are
+// rendered into the materialized markdown. The zero value is ModeOne (the
 // default), so an unparsed/empty flag degrades to the lightest useful form.
-type imageURLMode int
+type ImageURLMode int
 
 const (
-	imgModeOne  imageURLMode = iota // single clickable external URL + (WxH)
-	imgModeNone                     // caption only, no URL
-	imgModeFull                     // self-describing tag with all 4 routes (program-facing)
+	ModeOne  ImageURLMode = iota // single clickable external URL + (WxH)
+	ModeNone                     // caption only, no URL
+	ModeFull                     // self-describing tag with all 4 routes (program-facing)
 )
 
-func parseImageMode(s string) imageURLMode {
+func ParseImageMode(s string) ImageURLMode {
 	switch strings.TrimSpace(s) {
 	case "none":
-		return imgModeNone
+		return ModeNone
 	case "full":
-		return imgModeFull
+		return ModeFull
 	default:
-		return imgModeOne
+		return ModeOne
 	}
 }
 
@@ -36,10 +36,10 @@ func parseImageMode(s string) imageURLMode {
 // before the self-close). The capture group is the QAImageMetaMap key.
 var qaImageTagRe = regexp.MustCompile(`<qa_image\s+image_token="([^"]+)"\s*/>`)
 
-// renderImages rewrites every <qa_image .../> tag in md according to mode,
+// RenderImages rewrites every <qa_image .../> tag in md according to mode,
 // looking each token up in metas (keyed by image_token). Tags whose token is
 // absent from metas degrade to a caption-only / token placeholder.
-func renderImages(md string, metas map[string]*eqaImageMeta, mode imageURLMode) string {
+func RenderImages(md string, metas map[string]*ImageMeta, mode ImageURLMode) string {
 	if !strings.Contains(md, "<qa_image") {
 		return md
 	}
@@ -48,21 +48,21 @@ func renderImages(md string, metas map[string]*eqaImageMeta, mode imageURLMode) 
 		if len(m) < 2 {
 			return tag
 		}
-		return renderOneImage(m[1], metas[m[1]], mode)
+		return RenderOneImage(m[1], metas[m[1]], mode)
 	})
 }
 
-func renderOneImage(token string, meta *eqaImageMeta, mode imageURLMode) string {
+func RenderOneImage(token string, meta *ImageMeta, mode ImageURLMode) string {
 	caption := "image"
 	if meta != nil && strings.TrimSpace(meta.Caption) != "" {
 		caption = strings.TrimSpace(meta.Caption)
 	}
 	switch mode {
-	case imgModeNone:
+	case ModeNone:
 		return fmt.Sprintf("![%s]()", caption)
-	case imgModeFull:
+	case ModeFull:
 		return renderImageFull(token, meta)
-	default: // imgModeOne
+	default: // ModeOne
 		if meta == nil {
 			return fmt.Sprintf("![%s](%s)", caption, token)
 		}
@@ -75,7 +75,7 @@ func renderOneImage(token string, meta *eqaImageMeta, mode imageURLMode) string 
 }
 
 // dims renders " (WxH)" when both dimensions are known, else "".
-func dims(meta *eqaImageMeta) string {
+func dims(meta *ImageMeta) string {
 	if meta == nil || meta.Width <= 0 || meta.Height <= 0 {
 		return ""
 	}
@@ -84,7 +84,7 @@ func dims(meta *eqaImageMeta) string {
 
 // renderImageFull keeps a self-describing tag carrying all four CDN routes plus
 // dims and caption, for programmatic consumers of --image-urls full.
-func renderImageFull(token string, meta *eqaImageMeta) string {
+func renderImageFull(token string, meta *ImageMeta) string {
 	var b strings.Builder
 	b.WriteString("<qa_image")
 	writeAttr(&b, "token", token)
@@ -139,11 +139,11 @@ const truncateHintFmt = "> 还有 %d 行(用 base +record-list 取全量)"
 
 var gfmDelimiterRe = regexp.MustCompile(`^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$`)
 
-// truncateGFMTables caps each GFM table in md to maxRows data rows, inserting a
+// TruncateGFMTables caps each GFM table in md to maxRows data rows, inserting a
 // hint line after the kept rows (outside the table). maxRows <= 0 disables
 // truncation. Code-fenced regions are skipped so pipes inside code blocks are
 // never mistaken for tables. Each table is truncated independently.
-func truncateGFMTables(md string, maxRows int) string {
+func TruncateGFMTables(md string, maxRows int) string {
 	if maxRows <= 0 {
 		return md
 	}

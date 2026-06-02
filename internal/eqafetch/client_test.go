@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Lark Technologies Pte. Ltd.
 // SPDX-License-Identifier: MIT
 
-package doc
+package eqafetch
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 	"github.com/larksuite/cli/internal/faasbridge"
 )
 
-// TestFetchKnowledgeQADecodesContract drives fetchKnowledgeQA through a stub
-// gateway returning the thrift PascalCase JSON shape, asserting both the decode
-// and the identity headers the bridge injects.
-func TestFetchKnowledgeQADecodesContract(t *testing.T) {
+// TestFetchDecodesContract drives Fetch through a stub gateway returning the
+// thrift PascalCase JSON shape, asserting both the decode and the identity
+// headers the bridge injects.
+func TestFetchDecodesContract(t *testing.T) {
 	const canned = `{"Title":"Doc","FullContent":"# hi","URL":"https://x","UpdateTime":123,` +
 		`"QAImageMetaMap":{"t1":{"Caption":"图","Width":640,"Height":480,"OriginExternalImageURL":"https://ext"}},` +
 		`"BaseResp":{"StatusCode":0,"StatusMessage":"ok"}}`
@@ -37,9 +37,9 @@ func TestFetchKnowledgeQADecodesContract(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 	ident := faasbridge.Identity{AppID: "cli_x", UID: 42, Locale: "zh_CN"}
-	resp, err := fetchKnowledgeQA(context.Background(), client, ident, eqaFetchRequest{URL: "https://doc"})
+	resp, err := Fetch(context.Background(), client, ident, Request{URL: "https://doc"})
 	if err != nil {
-		t.Fatalf("fetchKnowledgeQA: %v", err)
+		t.Fatalf("Fetch: %v", err)
 	}
 
 	if resp.Title != "Doc" || resp.FullContent != "# hi" || resp.UpdateTime != 123 {
@@ -52,8 +52,8 @@ func TestFetchKnowledgeQADecodesContract(t *testing.T) {
 	if resp.BaseResp == nil || resp.BaseResp.StatusCode != 0 {
 		t.Errorf("baseresp decode mismatch: %+v", resp.BaseResp)
 	}
-	if gotPath != eqaFetchPath {
-		t.Errorf("path = %q, want %q", gotPath, eqaFetchPath)
+	if gotPath != Path {
+		t.Errorf("path = %q, want %q", gotPath, Path)
 	}
 	if gotHeaders.Get("Rpc-Transit-APP-ID") != "cli_x" || gotHeaders.Get("Rpc-Transit-USER-ID") != "42" {
 		t.Errorf("identity headers not injected: app=%q user=%q",
@@ -61,10 +61,10 @@ func TestFetchKnowledgeQADecodesContract(t *testing.T) {
 	}
 }
 
-// TestFetchKnowledgeQABlockIDRoundTrip asserts the mix-path contract: WithBlockID
-// is marshaled into the request body, and ContentWithBlockID decodes from the
+// TestFetchBlockIDRoundTrip asserts the mix-path contract: WithBlockID is
+// marshaled into the request body, and ContentWithBlockID decodes from the
 // response.
-func TestFetchKnowledgeQABlockIDRoundTrip(t *testing.T) {
+func TestFetchBlockIDRoundTrip(t *testing.T) {
 	const canned = `{"Title":"Doc","FullContent":"# hi",` +
 		`"ContentWithBlockID":"<h1 id=\"b1\">hi</h1>",` +
 		`"BaseResp":{"StatusCode":0}}`
@@ -82,11 +82,11 @@ func TestFetchKnowledgeQABlockIDRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	req := newEqaFetchRequest("https://doc")
+	req := NewRequest("https://doc")
 	req.WithBlockID = true
-	resp, err := fetchKnowledgeQA(context.Background(), client, faasbridge.Identity{}, req)
+	resp, err := Fetch(context.Background(), client, faasbridge.Identity{}, req)
 	if err != nil {
-		t.Fatalf("fetchKnowledgeQA: %v", err)
+		t.Fatalf("Fetch: %v", err)
 	}
 
 	if !strings.Contains(gotBody, `"WithBlockID":true`) {
@@ -97,18 +97,18 @@ func TestFetchKnowledgeQABlockIDRoundTrip(t *testing.T) {
 	}
 }
 
-// TestNewEqaFetchRequestOmitsBlockID guards the ②a path: without WithBlockID the
-// field is dropped from the wire (omitempty), so the inline-embeds request shape
-// is unchanged.
-func TestNewEqaFetchRequestOmitsBlockID(t *testing.T) {
+// TestNewRequestOmitsBlockID guards the ②a path: without WithBlockID the field
+// is dropped from the wire (omitempty), so the inline-embeds / sheet+base
+// request shape is unchanged.
+func TestNewRequestOmitsBlockID(t *testing.T) {
 	t.Parallel()
-	req := newEqaFetchRequest("https://doc")
+	req := NewRequest("https://doc")
 	if req.WithBlockID {
-		t.Fatalf("newEqaFetchRequest should default WithBlockID=false")
+		t.Fatalf("NewRequest should default WithBlockID=false")
 	}
 }
 
-func TestFetchKnowledgeQAHTTPErrorPropagates(t *testing.T) {
+func TestFetchHTTPErrorPropagates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"boom"}`))
@@ -120,7 +120,7 @@ func TestFetchKnowledgeQAHTTPErrorPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	if _, err := fetchKnowledgeQA(context.Background(), client, faasbridge.Identity{}, eqaFetchRequest{URL: "x"}); err == nil {
+	if _, err := Fetch(context.Background(), client, faasbridge.Identity{}, Request{URL: "x"}); err == nil {
 		t.Fatal("expected error on HTTP 500")
 	}
 }

@@ -107,6 +107,7 @@ metadata:
 | 命令 | 用途 / 何时使用 | 必读 reference | 路由提醒 |
 |------|------------------|----------------|----------|
 | `+record-search / +record-list / +record-get` | 按关键词检索记录、读取记录明细 / 分页导出，或按 ID 获取一条或多条记录 | [`lark-base-data-analysis-sop.md`](references/lark-base-data-analysis-sop.md) | 记录读取统一先读 data analysis SOP：已知 `record_id` 用 `+record-get`；明确关键词用 `+record-search`；普通明细用 `+record-list`；明确筛选 / 排序 / Top N 用临时视图投影后 `+record-list --view-id`；统计聚合才分流到 `+data-query`；`+record-get` 支持重复 `--record-id` 或 `--json` 读取多条记录 |
+| `+fetch` | 把整个多维表读成一串可读 markdown 正文（各子表内容展开成 GFM 表格，供喂模型 / 总结 / 阅读） | [`lark-base-fetch.md`](references/lark-base-fetch.md) | 读**整表为 md 正文**用 `+fetch`（走 qa fetch，URL 带 `?table=` 自动选子表）；要**结构化 record / 某表明细 / 分析**仍用 `+record-list` / `+record-get` / `+data-query`；qa 不可用时 `+fetch` 直接报错并提示改用 `+record-list` |
 | `+record-upsert / +record-batch-create / +record-batch-update` | 创建、更新或批量写入记录 | [`lark-base-record-upsert.md`](references/lark-base-record-upsert.md)、[`lark-base-record-batch-create.md`](references/lark-base-record-batch-create.md)、[`lark-base-record-batch-update.md`](references/lark-base-record-batch-update.md)、[`lark-base-cell-value.md`](references/lark-base-cell-value.md) | 写前先 `+field-list`；只写存储字段；`+record-batch-update` 为同值更新（同一 patch 应用到多条记录）；批量单次不超过 `200` 条；附件不要走这里 |
 | `+record-upload-attachment` | 给已有记录上传一个或多个附件 | 看 `lark-cli base +record-upload-attachment --help` | 附件上传专用链路，不要用 `+record-upsert` / `+record-batch-*` 伪造附件值；不支持 `--name` |
 | `+record-download-attachment` | 下载一个或多个 Base 附件到本地 | 看 `lark-cli base +record-download-attachment --help` | Base 附件必须用这个命令下载；用其他下载入口可能失败 |
@@ -230,6 +231,7 @@ metadata:
 | 要把结果长期显示在表里 | `formula` 字段 | 不要只给一次性手工分析结果 |
 | 用户明确要求 lookup，或天然是固定查找配置 | `lookup` 字段 | 不要默认先上 lookup；先判断 formula 是否更合适 |
 | 读取原始记录明细 / 关键词检索 / 导出 | `+record-search / +record-list / +record-get` | 不要拿 `+data-query` 当取数命令 |
+| 把整张多维表读成一串 md 正文（喂模型 / 总结） | `+fetch` | 不要用 `+record-list` 逐表拼；要结构化 record 时才用 `+record-list` |
 | 上传附件到记录 | `+record-upload-attachment` | 不要用 `+record-upsert` / `+record-batch-*` 伪造附件值 |
 | 下载记录里的附件文件 | `+record-download-attachment --record-id <record_id> --output <dir>`，可加 `--file-token <file_token>` 只下指定附件 | Base 附件必须用这个命令下载；用其他下载入口可能失败 |
 | 写入地理位置 | `+record-upsert` / `+record-batch-*` 传 `{lng,lat}` | 不要把纯地址文本当成 CellValue |
