@@ -106,6 +106,29 @@ func (c *Client) PostJSON(ctx context.Context, ident Identity, path string, body
 	return raw, nil
 }
 
+// Get issues a GET to path with identity headers and returns the raw response
+// bytes. Mirrors PostJSON's error contract (ErrNetwork on transport failure,
+// ErrAPI on non-2xx) so callers can treat any error uniformly. Used by the
+// search +ping health probe.
+func (c *Client) Get(ctx context.Context, ident Identity, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, output.Errorf(output.ExitInternal, "internal", "build faas request: %s", err)
+	}
+	c.injectIdentityHeaders(req, ident)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, output.ErrNetwork("faas: %s", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf("faas HTTP %d on %s", resp.StatusCode, path), string(raw))
+	}
+	return raw, nil
+}
+
 // injectIdentityHeaders writes the headers faas expects.
 //
 // Rpc-Transit-* headers are byted/kitex's HTTP-to-metainfo transport: the byted
