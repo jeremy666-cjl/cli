@@ -38,6 +38,13 @@ func openAPIBaseURL() string {
 	return strings.TrimRight(v, "/")
 }
 
+// OpenAPIBaseURL exposes the configured byte openapi base (used for openid2uid),
+// or "" when unset. Exposed so diagnostics like `search +ping` can report which
+// gateway resolves open_id → uid without constructing a live lookup.
+func OpenAPIBaseURL() string {
+	return openAPIBaseURL()
+}
+
 // lookupUIDForOpenID resolves a single open_id, hitting the cache first.
 func lookupUIDForOpenID(ctx context.Context, runtime *common.RuntimeContext, openID string) (int64, error) {
 	openID = strings.TrimSpace(openID)
