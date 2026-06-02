@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Lark Technologies Pte. Ltd.
+// SPDX-License-Identifier: MIT
+
+package doc
+
+import (
+	"context"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/larksuite/cli/internal/cmdutil"
+	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/shortcuts/common"
+)
+
+func TestValidateMix(t *testing.T) {
+	t.Parallel()
+	newRT := func(format string, inline bool, maxRows int) *common.RuntimeContext {
+		cmd := &cobra.Command{Use: "+fetch"}
+		cmd.Flags().Bool("inline-embeds", false, "")
+		cmd.Flags().String("doc-format", "xml", "")
+		cmd.Flags().Int("embed-max-rows", 50, "")
+		_ = cmd.Flags().Set("doc-format", format)
+		if inline {
+			_ = cmd.Flags().Set("inline-embeds", "true")
+		}
+		_ = cmd.Flags().Set("embed-max-rows", strconv.Itoa(maxRows))
+		return common.TestNewRuntimeContext(cmd, nil)
+	}
+
+	// mix + inline-embeds is a friendly conflict (mix already materializes).
+	if err := validateInlineEmbeds(newRT("mix", true, 50)); err == nil {
+		t.Error("mix + inline-embeds should error")
+	}
+	// mix carries its own ids/materialization; --embed-max-rows still validated.
+	if err := validateMix(newRT("mix", false, -1)); err == nil {
+		t.Error("mix + negative embed-max-rows should error")
+	}
+	if err := validateMix(newRT("mix", false, 50)); err != nil {
+		t.Errorf("mix with valid rows should pass, got: %v", err)
+	}
+	if err := validateMix(newRT("markdown", false, -1)); err != nil {
+		t.Errorf("non-mix format should skip mix validation, got: %v", err)
+	}
+}
+
+// TestMixFallsBackWhenFaasUnset verifies the "只增不减" guarantee for mix: with no
+// gateway configured it emits one notice and signals fallback (false, nil).
+func TestMixFallsBackWhenFaasUnset(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "")
+
+	f, _, stderrBuf, _ := cmdutil.TestFactory(t, nil)
+	cmd := &cobra.Command{Use: "+fetch"}
+	cmd.Flags().String("doc", "https://doc", "")
+	cmd.Flags().String("doc-format", "mix", "")
+	cmd.Flags().Int("embed-max-rows", 50, "")
+	cmd.Flags().String("image-urls", "one", "")
+	runtime := common.TestNewRuntimeContextForAPI(context.Background(), cmd, nil, f, core.AsUser)
+
+	handled, err := runMixFetch(context.Background(), runtime)
+	if handled || err != nil {
+		t.Fatalf("want (false, nil) fallback, got (%v, %v)", handled, err)
+	}
+	if !strings.Contains(stderrBuf.String(), "[mix]") {
+		t.Errorf("want fallback notice on stderr, got: %q", stderrBuf.String())
+	}
+}
+
+func TestDryRunMix(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+	cmd := &cobra.Command{Use: "+fetch"}
+	cmd.Flags().String("doc", "https://doc/abc", "")
+	cmd.Flags().String("image-urls", "one", "")
+	cmd.Flags().Int("embed-max-rows", 50, "")
+	runtime := common.TestNewRuntimeContext(cmd, nil)
+
+	dr := dryRunMix(runtime)
+	raw, err := json.Marshal(dr)
+	if err != nil {
+		t.Fatalf("marshal dry-run: %v", err)
+	}
+	out := string(raw)
+	for _, want := range []string{"https://faas.example/knowledge_qa/fetch", "POST", "https://doc/abc", "WithBlockID"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q in: %s", want, out)
+		}
+	}
+}

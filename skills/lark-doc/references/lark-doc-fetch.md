@@ -95,13 +95,15 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 
 `content` 的格式由 `--doc-format` 决定。设置 `--scope` 时会被 `<fragment>` 包裹，详见上文"局部读取的输出结构"。
 
+> **`--doc-format mix`（doc/wiki）**：经问答(eqa) fetch 取「已物化 + 带真实 blockid」的内容，渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。定位「读 + 回链」（模型读到 id 后可精确改某块）。内嵌多维表格在 mix 下为 id 化占位（要全量展开用 `--inline-embeds`）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 同样适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format` 标记该路径。
+
 ## 参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `--api-version` | 是 | 固定传 `v2` |
 | `--doc` | 是 | 文档 URL 或 token（支持 `/docx/` 和 `/wiki/`） |
-| `--doc-format` | 否 | `xml`（默认）\| `markdown` \| `text` |
+| `--doc-format` | 否 | `xml`（默认，保真可寻址）\| `markdown`（纯读最轻）\| `mix`（读+回链：物化 md + 块级 `{#blockid}` 锚点）\| `text` |
 | `--detail` | 否 | `simple`（默认）\| `with-ids` \| `full` |
 | `--revision-id` | 否 | 文档版本号，`-1` = 最新（默认） |
 | `--scope` | 否 | `outline` \| `range` \| `keyword` \| `section`（省略 = 读整篇） |

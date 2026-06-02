@@ -5,8 +5,10 @@ package doc
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/larksuite/cli/internal/faasbridge"
@@ -56,6 +58,53 @@ func TestFetchKnowledgeQADecodesContract(t *testing.T) {
 	if gotHeaders.Get("Rpc-Transit-APP-ID") != "cli_x" || gotHeaders.Get("Rpc-Transit-USER-ID") != "42" {
 		t.Errorf("identity headers not injected: app=%q user=%q",
 			gotHeaders.Get("Rpc-Transit-APP-ID"), gotHeaders.Get("Rpc-Transit-USER-ID"))
+	}
+}
+
+// TestFetchKnowledgeQABlockIDRoundTrip asserts the mix-path contract: WithBlockID
+// is marshaled into the request body, and ContentWithBlockID decodes from the
+// response.
+func TestFetchKnowledgeQABlockIDRoundTrip(t *testing.T) {
+	const canned = `{"Title":"Doc","FullContent":"# hi",` +
+		`"ContentWithBlockID":"<h1 id=\"b1\">hi</h1>",` +
+		`"BaseResp":{"StatusCode":0}}`
+
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(canned))
+	}))
+	defer srv.Close()
+	t.Setenv("LARK_CLI_QA_FAAS_URL", srv.URL)
+
+	client, err := faasbridge.NewClient()
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	req := newEqaFetchRequest("https://doc")
+	req.WithBlockID = true
+	resp, err := fetchKnowledgeQA(context.Background(), client, faasbridge.Identity{}, req)
+	if err != nil {
+		t.Fatalf("fetchKnowledgeQA: %v", err)
+	}
+
+	if !strings.Contains(gotBody, `"WithBlockID":true`) {
+		t.Errorf("request body missing WithBlockID: %s", gotBody)
+	}
+	if resp.ContentWithBlockID != `<h1 id="b1">hi</h1>` {
+		t.Errorf("ContentWithBlockID decode mismatch: %q", resp.ContentWithBlockID)
+	}
+}
+
+// TestNewEqaFetchRequestOmitsBlockID guards the ②a path: without WithBlockID the
+// field is dropped from the wire (omitempty), so the inline-embeds request shape
+// is unchanged.
+func TestNewEqaFetchRequestOmitsBlockID(t *testing.T) {
+	t.Parallel()
+	req := newEqaFetchRequest("https://doc")
+	if req.WithBlockID {
+		t.Fatalf("newEqaFetchRequest should default WithBlockID=false")
 	}
 }
 
