@@ -31,9 +31,7 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 		return inlineFallback(runtime, "identity", ierr)
 	}
 
-	// eqa re-parses the raw URL server-side (and reads ?sheet=/?table= to pick a
-	// sub-table), so forward the original --doc string, not the parsed token.
-	req := eqaFetchRequest{URL: strings.TrimSpace(runtime.Str("doc"))}
+	req := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
 	resp, ferr := fetchKnowledgeQA(ctx, client, ident, req)
 	if ferr != nil {
 		return inlineFallback(runtime, "eqa-call", ferr)
@@ -82,7 +80,7 @@ func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqaFetchResponse, md
 
 // dryRunInlineEmbeds describes the faas fetch call for --dry-run.
 func dryRunInlineEmbeds(runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := eqaFetchRequest{URL: strings.TrimSpace(runtime.Str("doc"))}
+	body := newEqaFetchRequest(strings.TrimSpace(runtime.Str("doc")))
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqaFetchPath).
 		Desc("qa faas: fetch document (materialized markdown)").

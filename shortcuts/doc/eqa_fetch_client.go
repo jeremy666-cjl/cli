@@ -30,6 +30,22 @@ type eqaImageConfig struct {
 	CompressionSize int64 `json:"CompressionSize,omitempty"`
 }
 
+// eqaImageExpireSeconds is the fixed validity window (seconds) we request for the
+// materialized image download URLs eqa returns. 1h is comfortably longer than an
+// interactive fetch + render cycle, so the URLs stay live while the user reads.
+const eqaImageExpireSeconds int64 = 3600
+
+// newEqaFetchRequest builds the fetch request for a raw --doc URL. eqa re-parses
+// the URL server-side (and reads ?sheet=/?table= to pick a sub-table), so callers
+// forward the original --doc string, not a parsed token. ImageConfig is always
+// sent with the fixed expire window.
+func newEqaFetchRequest(rawURL string) eqaFetchRequest {
+	return eqaFetchRequest{
+		URL:         rawURL,
+		ImageConfig: &eqaImageConfig{ImageExpireTime: eqaImageExpireSeconds},
+	}
+}
+
 // eqaFetchResponse mirrors the subset of enterprise_qa.FetchKnowledgeQaResponse
 // the cli reads. Unlisted fields (e.g. ContentWithBlockID) are ignored by
 // json.Unmarshal.
