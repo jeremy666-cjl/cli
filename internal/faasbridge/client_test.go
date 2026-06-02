@@ -52,6 +52,10 @@ func TestPostJSONInjectsHeadersAndReturnsBody(t *testing.T) {
 		t.Errorf("identity headers wrong: app=%q user=%q",
 			gotHeaders.Get("Rpc-Transit-APP-ID"), gotHeaders.Get("Rpc-Transit-USER-ID"))
 	}
+	// tenant_id is currently hardcoded to "1" (TODO in injectIdentityHeaders).
+	if gotHeaders.Get("Rpc-Transit-TENANT-ID") != "1" {
+		t.Errorf("tenant header = %q, want %q", gotHeaders.Get("Rpc-Transit-TENANT-ID"), "1")
+	}
 	if gotHeaders.Get("X-Qa-Cli-Locale") != "zh_CN" {
 		t.Errorf("locale header = %q", gotHeaders.Get("X-Qa-Cli-Locale"))
 	}

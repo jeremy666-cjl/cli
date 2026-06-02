@@ -135,8 +135,11 @@ func (c *Client) Get(ctx context.Context, ident Identity, path string) ([]byte, 
 // hertz middleware on the faas side reads them, normalizes `-` to `_`, and
 // writes the value into metainfo as a transient (single-hop) entry. The faas
 // handler then pulls them back via metainfo.GetValue(ctx, KEY_APP_ID /
-// KEY_USER_ID). tenant_id is resolved server-side from uid, so the CLI does not
-// send it.
+// KEY_USER_ID / KEY_TENANT_ID).
+//
+// TODO(tenant): tenant_id is meant to be resolved server-side from uid; until
+// that lands it is hardcoded to "1" here so the gateway/eqa metainfo has a
+// tenant. Replace with the real per-user tenant once available.
 //
 // X-Qa-Cli-{Locale,Timezone} are plain HTTP headers the faas handler reads
 // directly. When LARK_CLI_QA_FAAS_PPE is set, we also send the three byted PPE
@@ -144,6 +147,7 @@ func (c *Client) Get(ctx context.Context, ident Identity, path string) ([]byte, 
 func (c *Client) injectIdentityHeaders(req *http.Request, ident Identity) {
 	req.Header.Set("Rpc-Transit-APP-ID", ident.AppID)
 	req.Header.Set("Rpc-Transit-USER-ID", strconv.FormatInt(ident.UID, 10))
+	req.Header.Set("Rpc-Transit-TENANT-ID", "1")
 	if ident.Locale != "" {
 		req.Header.Set("X-Qa-Cli-Locale", ident.Locale)
 	}
