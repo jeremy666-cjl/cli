@@ -26,6 +26,9 @@ func v2FetchFlags() []common.Flag {
 		{Name: "context-before", Desc: "range/keyword/section mode: sibling blocks before match", Type: "int", Default: "0"},
 		{Name: "context-after", Desc: "range/keyword/section mode: sibling blocks after match", Type: "int", Default: "0"},
 		{Name: "max-depth", Desc: "outline: heading level cap; range/keyword/section: block subtree depth (-1 = unlimited)", Type: "int", Default: "-1"},
+		{Name: "inline-embeds", Type: "bool", Default: "false", Desc: "markdown only: expand embedded bitable/sheet to GFM via the qa fetch service (falls back to native markdown on any failure)"},
+		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "inline-embeds: cap each materialized table to N data rows (0 = no limit)"},
+		{Name: "image-urls", Default: "one", Enum: []string{"none", "one", "full"}, Desc: "inline-embeds: image rendering — none (caption only) | one (single URL + WxH) | full (all routes)"},
 	}
 }
 
@@ -42,10 +45,32 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if err := validateReadModeFlags(runtime); err != nil {
 		return err
 	}
+	if err := validateInlineEmbeds(runtime); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateInlineEmbeds gates the --inline-embeds family: it only applies to
+// markdown output (the materialized path has no block ids / xml structure), and
+// --embed-max-rows must be non-negative.
+func validateInlineEmbeds(runtime *common.RuntimeContext) error {
+	if !runtime.Bool("inline-embeds") {
+		return nil
+	}
+	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
+		return common.FlagErrorf("--inline-embeds requires --doc-format markdown (got %q)", format)
+	}
+	if v := runtime.Int("embed-max-rows"); v < 0 {
+		return common.FlagErrorf("--embed-max-rows must be >= 0, got %d", v)
+	}
 	return nil
 }
 
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
+	if runtime.Bool("inline-embeds") && strings.TrimSpace(runtime.Str("doc-format")) == "markdown" {
+		return dryRunInlineEmbeds(runtime)
+	}
 	// Validate has already accepted --doc; parseDocumentRef cannot fail here.
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 	body := buildFetchBody(runtime)
@@ -57,7 +82,16 @@ func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.Dr
 		Set("document_id", ref.Token)
 }
 
-func executeFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
+func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
+	// --inline-embeds routes to the qa fetch service for materialized markdown
+	// (embeds expanded to GFM). On any failure it returns handled=false and we
+	// fall through to the native docs_ai path below — "只增不减".
+	if runtime.Bool("inline-embeds") && strings.TrimSpace(runtime.Str("doc-format")) == "markdown" {
+		if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
+			return err
+		}
+	}
+
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", ref.Token)
