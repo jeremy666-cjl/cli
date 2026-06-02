@@ -13,5 +13,6 @@ func Shortcuts() []common.Shortcut {
 		MinutesUpload,
 		MinutesUpdate,
 		MinutesSpeakerReplace,
+		MinutesFetch,
 	}
 }

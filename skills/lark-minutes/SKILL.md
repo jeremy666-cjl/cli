@@ -60,6 +60,8 @@ lark-cli vc +notes --minute-tokens <minute_token>
 ```
 
 > **跨 skill 路由**：逐字稿、AI 总结、待办、章节等纪要内容由 [lark-vc](../lark-vc/SKILL.md) 的 `+notes` 命令提供
+>
+> **`minutes +fetch`（读）vs `vc +notes`（结构化 / 落盘）**：只想把一篇妙记**读成一串 markdown 正文**（总结 + 章节 + 待办，便于阅读或喂模型）用 [minutes +fetch](references/lark-minutes-fetch.md)（`--include transcript` 可把逐字稿内联进正文）；要**结构化产物字段**、或把逐字稿 / 纪要文档**下载成文件**用 [vc +notes --minute-tokens](../lark-vc/references/lark-vc-notes.md)。
 
 ### 5. 上传音视频文件生成妙记（并可继续获取纪要 / 逐字稿）
 
@@ -95,7 +97,8 @@ Minutes (妙记) ← minute_token 标识
 > - `minutes +search` 单次最多返回 `200` 条；结果总数没有固定上限
 > - 用户说"这个妙记的标题 / 时长 / 封面 / 链接" → `minutes minutes get`
 > - 用户说"下载这个妙记的视频 / 音频 / 媒体文件" → `minutes +download`
-> - 用户说"这个妙记的逐字稿 / 文字稿 / 撰写文字 / 总结 / 待办 / 章节" → 使用 [vc +notes --minute-tokens](../lark-vc/references/lark-vc-notes.md)
+> - 用户说"读一下这个妙记 / 这个妙记讲了啥 / 把妙记内容整理成 markdown / 总结这篇妙记" → [`minutes +fetch`](references/lark-minutes-fetch.md)（一串可读 markdown 正文）
+> - 用户说"这个妙记的逐字稿 / 文字稿 / 撰写文字 / 总结 / 待办 / 章节"（要**结构化字段**或**落盘文件**） → 使用 [vc +notes --minute-tokens](../lark-vc/references/lark-vc-notes.md)
 > - 用户说"通过文件生成妙记 / 把音视频转妙记" → 先上传获取 `file_token`，然后使用 `minutes +upload`
 > - 用户说"把音视频文件转成纪要 / 逐字稿 / 文字稿 / 撰写文字 / 总结 / 待办 / 章节" → 先上传获取 `file_token`，调用 `minutes +upload` 生成 `minute_url`，再提取 `minute_token` 走 `vc +notes --minute-tokens`
 > - 用户说"重命名妙记 / 改妙记标题 / 修改妙记名字" → `minutes +update`
@@ -108,12 +111,14 @@ Shortcut 是对常用操作的高级封装（`lark-cli minutes +<verb> [flags]`�
 | Shortcut                                           | 说明                                                              |
 | -------------------------------------------------- | --------------------------------------------------------------- |
 | [`+search`](references/lark-minutes-search.md)     | Search minutes by keyword, owners, participants, and time range |
+| [`+fetch`](references/lark-minutes-fetch.md)       | Read a minute as one markdown body (summary + chapters + todos) |
 | [`+download`](references/lark-minutes-download.md) | Download audio/video media file of a minute                     |
 | [`+upload`](references/lark-minutes-upload.md)     | Upload a media file token to generate a minute                  |
 | [`+update`](references/lark-minutes-update.md)     | Update a minute's title                                         |
 | [`+speaker-replace`](references/lark-minutes-speaker-replace.md) | Replace a speaker in a minute's transcript (rebind from one user to another) |
 
 - 使用 `+search` 命令时，必须阅读 [references/lark-minutes-search.md](references/lark-minutes-search.md)，了解搜索参数和返回值结构。
+- 使用 `+fetch` 命令时，必须阅读 [references/lark-minutes-fetch.md](references/lark-minutes-fetch.md)，了解读取参数、`--include` 扩展和与 `vc +notes` 的分工。
 - 使用 `+download` 命令时，必须阅读 [references/lark-minutes-download.md](references/lark-minutes-download.md)，了解下载参数和返回值结构。
 - 使用 `+upload` 命令时，必须阅读 [references/lark-minutes-upload.md](references/lark-minutes-upload.md)，了解生成参数和返回值结构。
 - 使用 `+update` 命令时，必须阅读 [references/lark-minutes-update.md](references/lark-minutes-update.md)，了解修改参数和返回值结构。
