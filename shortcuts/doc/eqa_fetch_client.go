@@ -17,12 +17,13 @@ const eqaFetchPath = "/knowledge_qa/fetch"
 
 // eqaFetchRequest mirrors the subset of enterprise_qa.FetchKnowledgeQaRequest the
 // cli sends. JSON tags match the thrift PascalCase emission so the gateway
-// (which passes thrift-JSON through) binds them. WithBlockID is intentionally
-// omitted: --inline-embeds (②a) consumes the materialized markdown only; block
-// ids are the mix-format (⑤b) concern.
+// (which passes thrift-JSON through) binds them. WithBlockID is set only by the
+// mix path (⑤b) to ask eqa/qa for ContentWithBlockID (XML with real block ids);
+// --inline-embeds (②a) leaves it false so omitempty drops it from the wire.
 type eqaFetchRequest struct {
 	URL         string          `json:"URL"`
 	ImageConfig *eqaImageConfig `json:"ImageConfig,omitempty"`
+	WithBlockID bool            `json:"WithBlockID,omitempty"`
 }
 
 type eqaImageConfig struct {
@@ -47,15 +48,17 @@ func newEqaFetchRequest(rawURL string) eqaFetchRequest {
 }
 
 // eqaFetchResponse mirrors the subset of enterprise_qa.FetchKnowledgeQaResponse
-// the cli reads. Unlisted fields (e.g. ContentWithBlockID) are ignored by
-// json.Unmarshal.
+// the cli reads. Unlisted fields are ignored by json.Unmarshal. ContentWithBlockID
+// is qa's XMLDocTreeRender output (XML carrying real block ids); eqa populates it
+// only when the request set WithBlockID, so it is empty for the ②a path.
 type eqaFetchResponse struct {
-	Title          string                   `json:"Title"`
-	FullContent    string                   `json:"FullContent"`
-	URL            string                   `json:"URL"`
-	UpdateTime     int64                    `json:"UpdateTime"`
-	QAImageMetaMap map[string]*eqaImageMeta `json:"QAImageMetaMap"`
-	BaseResp       *eqaBaseResp             `json:"BaseResp"`
+	Title              string                   `json:"Title"`
+	FullContent        string                   `json:"FullContent"`
+	URL                string                   `json:"URL"`
+	UpdateTime         int64                    `json:"UpdateTime"`
+	QAImageMetaMap     map[string]*eqaImageMeta `json:"QAImageMetaMap"`
+	ContentWithBlockID string                   `json:"ContentWithBlockID"`
+	BaseResp           *eqaBaseResp             `json:"BaseResp"`
 }
 
 // eqaImageMeta mirrors enterprise_qa.QAImageMeta: a doc image's caption, pixel

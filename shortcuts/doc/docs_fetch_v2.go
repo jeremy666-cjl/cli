@@ -16,7 +16,7 @@ import (
 // v2FetchFlags returns the flag definitions for the v2 (OpenAPI) fetch path.
 func v2FetchFlags() []common.Flag {
 	return []common.Flag{
-		{Name: "doc-format", Desc: "content format", Hidden: true, Default: "xml", Enum: []string{"xml", "markdown"}},
+		{Name: "doc-format", Desc: "content format", Hidden: true, Default: "xml", Enum: []string{"xml", "markdown", "mix"}},
 		{Name: "detail", Desc: "export detail level: simple (read-only) | with-ids (block IDs for cross-referencing) | full (all attrs for editing)", Hidden: true, Default: "simple", Enum: []string{"simple", "with-ids", "full"}},
 		{Name: "revision-id", Desc: "document revision (-1 = latest)", Hidden: true, Type: "int", Default: "-1"},
 		{Name: "scope", Desc: "partial read scope: outline | range | keyword | section (omit to read whole doc)", Default: "full", Enum: []string{"full", "outline", "range", "keyword", "section"}},
@@ -48,6 +48,9 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if err := validateInlineEmbeds(runtime); err != nil {
 		return err
 	}
+	if err := validateMix(runtime); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -58,7 +61,11 @@ func validateInlineEmbeds(runtime *common.RuntimeContext) error {
 	if !runtime.Bool("inline-embeds") {
 		return nil
 	}
-	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	if format == "mix" {
+		return common.FlagErrorf("--doc-format mix already materializes embeds; drop --inline-embeds")
+	}
+	if format != "markdown" {
 		return common.FlagErrorf("--inline-embeds requires --doc-format markdown (got %q)", format)
 	}
 	if v := runtime.Int("embed-max-rows"); v < 0 {
@@ -67,9 +74,25 @@ func validateInlineEmbeds(runtime *common.RuntimeContext) error {
 	return nil
 }
 
+// validateMix gates --doc-format mix: it reuses --embed-max-rows for its
+// materialized native sheets, so the same non-negative rule applies.
+func validateMix(runtime *common.RuntimeContext) error {
+	if strings.TrimSpace(runtime.Str("doc-format")) != "mix" {
+		return nil
+	}
+	if v := runtime.Int("embed-max-rows"); v < 0 {
+		return common.FlagErrorf("--embed-max-rows must be >= 0, got %d", v)
+	}
+	return nil
+}
+
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
-	if runtime.Bool("inline-embeds") && strings.TrimSpace(runtime.Str("doc-format")) == "markdown" {
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	if runtime.Bool("inline-embeds") && format == "markdown" {
 		return dryRunInlineEmbeds(runtime)
+	}
+	if format == "mix" {
+		return dryRunMix(runtime)
 	}
 	// Validate has already accepted --doc; parseDocumentRef cannot fail here.
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
@@ -86,8 +109,16 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 	// --inline-embeds routes to the qa fetch service for materialized markdown
 	// (embeds expanded to GFM). On any failure it returns handled=false and we
 	// fall through to the native docs_ai path below — "只增不减".
-	if runtime.Bool("inline-embeds") && strings.TrimSpace(runtime.Str("doc-format")) == "markdown" {
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	if runtime.Bool("inline-embeds") && format == "markdown" {
 		if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
+			return err
+		}
+	}
+	// --doc-format mix routes to the qa fetch service for block-id-anchored
+	// markdown. Same fallback contract as inline-embeds.
+	if format == "mix" {
+		if handled, err := runMixFetch(ctx, runtime); handled {
 			return err
 		}
 	}
@@ -96,6 +127,11 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", ref.Token)
 	body := buildFetchBody(runtime)
+	if format == "mix" {
+		// mix is a cli-only format the native docs_ai path doesn't know; on
+		// fallback degrade to markdown (the closest read-oriented native output).
+		body["format"] = "markdown"
+	}
 
 	data, err := doDocAPI(runtime, "POST", apiPath, body)
 	if err != nil {
