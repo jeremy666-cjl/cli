@@ -17,7 +17,7 @@ import (
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
-func TestValidateMix(t *testing.T) {
+func TestValidateMarkdownFormat(t *testing.T) {
 	t.Parallel()
 	newRT := func(format string, inline bool, maxRows int) *common.RuntimeContext {
 		cmd := &cobra.Command{Use: "+fetch"}
@@ -32,19 +32,24 @@ func TestValidateMix(t *testing.T) {
 		return common.TestNewRuntimeContext(cmd, nil)
 	}
 
-	// mix + inline-embeds is a friendly conflict (mix already materializes).
-	if err := validateInlineEmbeds(newRT("mix", true, 50)); err == nil {
-		t.Error("mix + inline-embeds should error")
+	// markdown + inline-embeds is the valid expansion combo.
+	if err := validateInlineEmbeds(newRT("markdown", true, 50)); err != nil {
+		t.Errorf("markdown + inline-embeds should pass, got: %v", err)
 	}
-	// mix carries its own ids/materialization; --embed-max-rows still validated.
-	if err := validateMix(newRT("mix", false, -1)); err == nil {
-		t.Error("mix + negative embed-max-rows should error")
+	// --inline-embeds requires the markdown lane.
+	if err := validateInlineEmbeds(newRT("xml", true, 50)); err == nil {
+		t.Error("xml + inline-embeds should error")
 	}
-	if err := validateMix(newRT("mix", false, 50)); err != nil {
-		t.Errorf("mix with valid rows should pass, got: %v", err)
+	// plain markdown (→ mix) still validates --embed-max-rows.
+	if err := validateMarkdownFormat(newRT("markdown", false, -1)); err == nil {
+		t.Error("markdown + negative embed-max-rows should error")
 	}
-	if err := validateMix(newRT("markdown", false, -1)); err != nil {
-		t.Errorf("non-mix format should skip mix validation, got: %v", err)
+	if err := validateMarkdownFormat(newRT("markdown", false, 50)); err != nil {
+		t.Errorf("markdown with valid rows should pass, got: %v", err)
+	}
+	// xml skips the markdown-lane row validation.
+	if err := validateMarkdownFormat(newRT("xml", false, -1)); err != nil {
+		t.Errorf("non-markdown format should skip markdown validation, got: %v", err)
 	}
 }
 
@@ -56,7 +61,7 @@ func TestMixFallsBackWhenFaasUnset(t *testing.T) {
 	f, _, stderrBuf, _ := cmdutil.TestFactory(t, nil)
 	cmd := &cobra.Command{Use: "+fetch"}
 	cmd.Flags().String("doc", "https://doc", "")
-	cmd.Flags().String("doc-format", "mix", "")
+	cmd.Flags().String("doc-format", "markdown", "")
 	cmd.Flags().Int("embed-max-rows", 50, "")
 	cmd.Flags().String("image-urls", "one", "")
 	runtime := common.TestNewRuntimeContextForAPI(context.Background(), cmd, nil, f, core.AsUser)

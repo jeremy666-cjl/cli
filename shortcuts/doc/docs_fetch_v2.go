@@ -16,7 +16,7 @@ import (
 // v2FetchFlags returns the flag definitions for the v2 (OpenAPI) fetch path.
 func v2FetchFlags() []common.Flag {
 	return []common.Flag{
-		{Name: "doc-format", Desc: "content format", Hidden: true, Default: "xml", Enum: []string{"xml", "markdown", "mix"}},
+		{Name: "doc-format", Desc: "content format", Hidden: true, Default: "xml", Enum: []string{"xml", "markdown"}},
 		{Name: "detail", Desc: "export detail level: simple (read-only) | with-ids (block IDs for cross-referencing) | full (all attrs for editing)", Hidden: true, Default: "simple", Enum: []string{"simple", "with-ids", "full"}},
 		{Name: "revision-id", Desc: "document revision (-1 = latest)", Hidden: true, Type: "int", Default: "-1"},
 		{Name: "scope", Desc: "partial read scope: outline | range | keyword | section (omit to read whole doc)", Default: "full", Enum: []string{"full", "outline", "range", "keyword", "section"}},
@@ -48,36 +48,30 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if err := validateInlineEmbeds(runtime); err != nil {
 		return err
 	}
-	if err := validateMix(runtime); err != nil {
+	if err := validateMarkdownFormat(runtime); err != nil {
 		return err
 	}
 	return nil
 }
 
-// validateInlineEmbeds gates the --inline-embeds family: it only applies to
-// markdown output (the materialized path has no block ids / xml structure), and
-// --embed-max-rows must be non-negative.
+// validateInlineEmbeds gates the --inline-embeds flag: it only applies to the
+// markdown lane (the expansion path has no xml structure).
 func validateInlineEmbeds(runtime *common.RuntimeContext) error {
 	if !runtime.Bool("inline-embeds") {
 		return nil
 	}
-	format := strings.TrimSpace(runtime.Str("doc-format"))
-	if format == "mix" {
-		return common.FlagErrorf("--doc-format mix already materializes embeds; drop --inline-embeds")
-	}
-	if format != "markdown" {
+	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
 		return common.FlagErrorf("--inline-embeds requires --doc-format markdown (got %q)", format)
-	}
-	if v := runtime.Int("embed-max-rows"); v < 0 {
-		return common.FlagErrorf("--embed-max-rows must be >= 0, got %d", v)
 	}
 	return nil
 }
 
-// validateMix gates --doc-format mix: it reuses --embed-max-rows for its
-// materialized native sheets, so the same non-negative rule applies.
-func validateMix(runtime *common.RuntimeContext) error {
-	if strings.TrimSpace(runtime.Str("doc-format")) != "mix" {
+// validateMarkdownFormat gates the markdown lane, which routes through the qa
+// fetch service — "mix" (readable md + block-id anchors) when plain, the
+// --inline-embeds expansion otherwise. Both materialize tables, so the same
+// non-negative --embed-max-rows rule applies.
+func validateMarkdownFormat(runtime *common.RuntimeContext) error {
+	if strings.TrimSpace(runtime.Str("doc-format")) != "markdown" {
 		return nil
 	}
 	if v := runtime.Int("embed-max-rows"); v < 0 {
@@ -88,10 +82,12 @@ func validateMix(runtime *common.RuntimeContext) error {
 
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 	format := strings.TrimSpace(runtime.Str("doc-format"))
-	if runtime.Bool("inline-embeds") && format == "markdown" {
-		return dryRunInlineEmbeds(runtime)
-	}
-	if format == "mix" {
+	if format == "markdown" {
+		// The markdown lane goes through the qa fetch service: --inline-embeds
+		// expands embeds to GFM, plain markdown gets the "mix" block-id render.
+		if runtime.Bool("inline-embeds") {
+			return dryRunInlineEmbeds(runtime)
+		}
 		return dryRunMix(runtime)
 	}
 	// Validate has already accepted --doc; parseDocumentRef cannot fail here.
@@ -106,32 +102,29 @@ func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.Dr
 }
 
 func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
-	// --inline-embeds routes to the qa fetch service for materialized markdown
-	// (embeds expanded to GFM). On any failure it returns handled=false and we
-	// fall through to the native docs_ai path below — "只增不减".
+	// The markdown lane routes through the qa fetch service: plain markdown →
+	// "mix" (readable md + block-id anchors), --inline-embeds → embeds expanded
+	// to GFM. On any failure the run* helper returns handled=false and we fall
+	// through to the native docs_ai markdown path below — "只增不减".
 	format := strings.TrimSpace(runtime.Str("doc-format"))
-	if runtime.Bool("inline-embeds") && format == "markdown" {
-		if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
-			return err
-		}
-	}
-	// --doc-format mix routes to the qa fetch service for block-id-anchored
-	// markdown. Same fallback contract as inline-embeds.
-	if format == "mix" {
-		if handled, err := runMixFetch(ctx, runtime); handled {
-			return err
+	if format == "markdown" {
+		if runtime.Bool("inline-embeds") {
+			if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
+				return err
+			}
+		} else {
+			if handled, err := runMixFetch(ctx, runtime); handled {
+				return err
+			}
 		}
 	}
 
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 
+	// On fallback, body["format"] is already "markdown" (the native docs_ai
+	// markdown output), so no remap is needed.
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", ref.Token)
 	body := buildFetchBody(runtime)
-	if format == "mix" {
-		// mix is a cli-only format the native docs_ai path doesn't know; on
-		// fallback degrade to markdown (the closest read-oriented native output).
-		body["format"] = "markdown"
-	}
 
 	data, err := doDocAPI(runtime, "POST", apiPath, body)
 	if err != nil {
@@ -212,15 +205,21 @@ func buildReadOption(runtime *common.RuntimeContext) map[string]interface{} {
 	return ro
 }
 
-// validateFetchDetail 非 xml 格式（markdown）不承载 block_id 与样式属性，拒绝 with-ids/full。
+// validateFetchDetail gates --detail by format. Plain markdown now routes
+// through the qa "mix" lane, which carries {#blockid} anchors, so with-ids/full
+// are allowed there. Only --doc-format markdown --inline-embeds (the expansion
+// path) has no block ids.
 func validateFetchDetail(runtime *common.RuntimeContext) error {
 	format := strings.TrimSpace(runtime.Str("doc-format"))
 	detail := strings.TrimSpace(runtime.Str("detail"))
 	if format == "" || format == "xml" {
 		return nil
 	}
+	if format == "markdown" && !runtime.Bool("inline-embeds") {
+		return nil
+	}
 	if detail == "with-ids" || detail == "full" {
-		return common.FlagErrorf("--detail %s is only supported with --doc-format xml; %s output has no block ids, use --detail simple or switch to --doc-format xml", detail, format)
+		return common.FlagErrorf("--detail %s has no effect with --doc-format markdown --inline-embeds (no block ids); use plain --doc-format markdown or --doc-format xml", detail)
 	}
 	return nil
 }

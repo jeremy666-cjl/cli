@@ -2,6 +2,8 @@
 
 `docs +fetch --api-version v2` / `docs +create --api-version v2` / `docs +update --api-version v2` 使用 `--doc-format markdown` 时适用。
 
+> **注意（fetch）**：`docs +fetch --doc-format markdown` 输出在标题/表/图/画板后带 `{#blockid}` 块级锚点（可直接用于 `docs +update --block-id`）；加 `--inline-embeds` 则改为展开内嵌电子表格/多维表格、但**不带**块级锚点。本转义参考主要面向写入（create/update）。
+
 ## 转义规则
 
 > **⚠️ 当文本中包含以下字符且不想触发 Markdown 语法时**，需用 `\` 前缀转义。转义分为**无条件转义**（行内任意位置生效）和**位置敏感转义**（仅特定位置才需要）两类。
