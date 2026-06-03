@@ -46,6 +46,14 @@ func parseDocumentRef(input string) (documentRef, error) {
 	return documentRef{Kind: "docx", Token: raw}, nil
 }
 
+// docEqaInputURL returns the URL to forward to the eqa fetch lane for --doc.
+// eqa is URL-addressed, so a bare docx token is expanded into a brand-standard
+// URL (matching parseDocumentRef's docx default and the native docs_ai lane);
+// a real URL (docx / wiki) is forwarded verbatim. See common.ResourceURLOrBuild.
+func docEqaInputURL(runtime *common.RuntimeContext) string {
+	return common.ResourceURLOrBuild(runtime.Brand(), "docx", strings.TrimSpace(runtime.Str("doc")))
+}
+
 func extractDocumentToken(raw, marker string) (string, bool) {
 	idx := strings.Index(raw, marker)
 	if idx < 0 {

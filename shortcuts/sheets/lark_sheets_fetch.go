@@ -45,13 +45,16 @@ var SheetFetch = common.Shortcut{
 	},
 }
 
-// sheetFetchRawInput returns the original string to forward to eqa: the raw URL
-// when given (so ?sheet= survives), else the bare token.
+// sheetFetchRawInput returns the URL to forward to eqa. eqa is URL-addressed, so
+// a bare --spreadsheet-token is expanded into a brand-standard spreadsheet URL
+// (the native `sheets +read` lane is token-addressed and needs no such step). A
+// real --url is forwarded verbatim so ?sheet= survives to the server.
 func sheetFetchRawInput(runtime *common.RuntimeContext) string {
-	if url := strings.TrimSpace(runtime.Str("url")); url != "" {
-		return url
+	urlOrToken := strings.TrimSpace(runtime.Str("url"))
+	if urlOrToken == "" {
+		urlOrToken = strings.TrimSpace(runtime.Str("spreadsheet-token"))
 	}
-	return strings.TrimSpace(runtime.Str("spreadsheet-token"))
+	return common.ResourceURLOrBuild(runtime.Brand(), "sheet", urlOrToken)
 }
 
 func validateSheetFetch(ctx context.Context, runtime *common.RuntimeContext) error {

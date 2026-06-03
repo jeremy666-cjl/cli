@@ -41,10 +41,11 @@ func TestSheetFetchRawInput(t *testing.T) {
 	if got := sheetFetchRawInput(rtURL); got != "https://x.feishu.cn/sheets/shtABC?sheet=sub1" {
 		t.Errorf("url should win verbatim (preserving ?sheet=), got %q", got)
 	}
-	// Token-only falls back to the bare token.
+	// Token-only is expanded into a brand-standard spreadsheet URL, since eqa is
+	// URL-addressed (a bare token would not parse server-side).
 	rtTok := common.TestNewRuntimeContext(sheetFetchCmd("", "shtABC"), nil)
-	if got := sheetFetchRawInput(rtTok); got != "shtABC" {
-		t.Errorf("token fallback wrong, got %q", got)
+	if got := sheetFetchRawInput(rtTok); got != "https://www.feishu.cn/sheets/shtABC" {
+		t.Errorf("token should expand to a brand-standard sheets URL, got %q", got)
 	}
 }
 
@@ -90,6 +91,22 @@ func TestDryRunSheetFetch(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q in: %s", want, out)
 		}
+	}
+}
+
+// TestDryRunSheetFetchTokenOnly asserts a bare --spreadsheet-token is expanded
+// into a brand-standard URL on the wire (eqa is URL-addressed).
+func TestDryRunSheetFetchTokenOnly(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+	runtime := common.TestNewRuntimeContext(sheetFetchCmd("", "shtABC"), nil)
+
+	dr := dryRunSheetFetch(context.Background(), runtime)
+	raw, err := json.Marshal(dr)
+	if err != nil {
+		t.Fatalf("marshal dry-run: %v", err)
+	}
+	if out := string(raw); !strings.Contains(out, "https://www.feishu.cn/sheets/shtABC") {
+		t.Errorf("token-only dry-run should forward a reconstructed sheets URL, got: %s", out)
 	}
 }
 

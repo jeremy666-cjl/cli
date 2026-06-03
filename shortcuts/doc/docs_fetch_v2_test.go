@@ -126,6 +126,36 @@ func TestDryRunFetchV2KeepsInlineEmbeds(t *testing.T) {
 	}
 }
 
+// TestDryRunFetchV2MarkdownDocInput: a bare --doc token is expanded into a
+// brand-standard docx URL before being forwarded to the qa fetch lane (eqa is
+// URL-addressed), while a real URL is forwarded verbatim.
+func TestDryRunFetchV2MarkdownDocInput(t *testing.T) {
+	newRT := func(doc string) *common.RuntimeContext {
+		cmd := &cobra.Command{Use: "+fetch"}
+		cmd.Flags().String("doc", "", "")
+		cmd.Flags().String("doc-format", "markdown", "")
+		cmd.Flags().Bool("inline-embeds", false, "")
+		cmd.Flags().String("image-urls", "one", "")
+		cmd.Flags().Int("embed-max-rows", 50, "")
+		_ = cmd.Flags().Set("doc", doc)
+		return common.TestNewRuntimeContext(cmd, nil)
+	}
+	dryURL := func(rt *common.RuntimeContext) string {
+		t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+		raw, err := json.Marshal(dryRunFetchV2(context.Background(), rt))
+		if err != nil {
+			t.Fatalf("marshal dry-run: %v", err)
+		}
+		return string(raw)
+	}
+	if out := dryURL(newRT("doxcnABC")); !strings.Contains(out, "https://www.feishu.cn/docx/doxcnABC") {
+		t.Errorf("bare --doc token should reconstruct a docx URL; got: %s", out)
+	}
+	if out := dryURL(newRT("https://x.feishu.cn/wiki/wikABC")); !strings.Contains(out, "https://x.feishu.cn/wiki/wikABC") {
+		t.Errorf("a real --doc URL should be forwarded verbatim; got: %s", out)
+	}
+}
+
 // TestValidateFetchDetailMarkdownBlockIds: markdown (→ mix) now carries block
 // ids, so with-ids/full are allowed; only --inline-embeds (no ids) is rejected.
 func TestValidateFetchDetailMarkdownBlockIds(t *testing.T) {

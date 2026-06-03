@@ -41,10 +41,11 @@ func TestBaseFetchRawInput(t *testing.T) {
 	if got := baseFetchRawInput(rtURL); got != "https://x.feishu.cn/base/appABC?table=tblX" {
 		t.Errorf("url should win verbatim (preserving ?table=), got %q", got)
 	}
-	// Token-only falls back to the bare app_token.
+	// Token-only is expanded into a brand-standard bitable URL, since eqa is
+	// URL-addressed (a bare app_token would not parse server-side).
 	rtTok := common.TestNewRuntimeContext(baseFetchCmd("", "appABC"), nil)
-	if got := baseFetchRawInput(rtTok); got != "appABC" {
-		t.Errorf("token fallback wrong, got %q", got)
+	if got := baseFetchRawInput(rtTok); got != "https://www.feishu.cn/base/appABC" {
+		t.Errorf("token should expand to a brand-standard base URL, got %q", got)
 	}
 }
 
@@ -90,6 +91,22 @@ func TestDryRunBaseFetch(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q in: %s", want, out)
 		}
+	}
+}
+
+// TestDryRunBaseFetchTokenOnly asserts a bare --base-token is expanded into a
+// brand-standard URL on the wire (eqa is URL-addressed).
+func TestDryRunBaseFetchTokenOnly(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+	runtime := common.TestNewRuntimeContext(baseFetchCmd("", "appABC"), nil)
+
+	dr := dryRunBaseFetch(context.Background(), runtime)
+	raw, err := json.Marshal(dr)
+	if err != nil {
+		t.Fatalf("marshal dry-run: %v", err)
+	}
+	if out := string(raw); !strings.Contains(out, "https://www.feishu.cn/base/appABC") {
+		t.Errorf("token-only dry-run should forward a reconstructed base URL, got: %s", out)
 	}
 }
 

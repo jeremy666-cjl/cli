@@ -32,7 +32,7 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 		return inlineFallback(runtime, "identity", ierr)
 	}
 
-	req := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
+	req := eqafetch.NewRequest(docEqaInputURL(runtime))
 	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
 		return inlineFallback(runtime, "eqa-call", ferr)
@@ -81,7 +81,7 @@ func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqafetch.Response, m
 
 // dryRunInlineEmbeds describes the faas fetch call for --dry-run.
 func dryRunInlineEmbeds(runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := eqafetch.NewRequest(strings.TrimSpace(runtime.Str("doc")))
+	body := eqafetch.NewRequest(docEqaInputURL(runtime))
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch document (materialized markdown)").
