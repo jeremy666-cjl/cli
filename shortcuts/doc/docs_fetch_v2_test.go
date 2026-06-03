@@ -186,6 +186,94 @@ func TestValidateFetchDetailMarkdownBlockIds(t *testing.T) {
 	}
 }
 
+// newFetchScopeRuntime builds a +fetch runtime carrying doc-format / scope /
+// keyword / detail plus every flag buildFetchBody and the v2 dispatch read, so a
+// markdown + --scope partial read can be both routed and serialized end to end.
+func newFetchScopeRuntime(format, scope, keyword, detail string) *common.RuntimeContext {
+	cmd := &cobra.Command{Use: "+fetch"}
+	cmd.Flags().String("doc", "doxcnABC", "")
+	cmd.Flags().String("doc-format", "xml", "")
+	cmd.Flags().String("detail", "simple", "")
+	cmd.Flags().Int("revision-id", -1, "")
+	cmd.Flags().String("scope", "full", "")
+	cmd.Flags().String("start-block-id", "", "")
+	cmd.Flags().String("end-block-id", "", "")
+	cmd.Flags().String("keyword", "", "")
+	cmd.Flags().Int("context-before", 0, "")
+	cmd.Flags().Int("context-after", 0, "")
+	cmd.Flags().Int("max-depth", -1, "")
+	cmd.Flags().Bool("inline-embeds", false, "")
+	cmd.Flags().String("image-urls", "one", "")
+	cmd.Flags().Int("embed-max-rows", 50, "")
+	_ = cmd.Flags().Set("doc-format", format)
+	if scope != "" {
+		_ = cmd.Flags().Set("scope", scope)
+	}
+	if keyword != "" {
+		_ = cmd.Flags().Set("keyword", keyword)
+	}
+	if detail != "" {
+		_ = cmd.Flags().Set("detail", detail)
+	}
+	return common.TestNewRuntimeContext(cmd, nil)
+}
+
+// TestDryRunFetchV2MarkdownScopeGoesNative: a --scope partial read under markdown
+// skips the qa mix lane (eqa has no read_option) and dry-runs the native docs_ai
+// fetch with read_option carrying the keyword.
+func TestDryRunFetchV2MarkdownScopeGoesNative(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+	rt := newFetchScopeRuntime("markdown", "keyword", "deploy|release", "")
+	raw, err := json.Marshal(dryRunFetchV2(context.Background(), rt))
+	if err != nil {
+		t.Fatalf("marshal dry-run: %v", err)
+	}
+	out := string(raw)
+	for _, want := range []string{"/docs_ai/v1/documents/", "read_option", "keyword", "deploy|release"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("markdown --scope keyword should dry-run native docs_ai with read_option; missing %q in: %s", want, out)
+		}
+	}
+	for _, unexpected := range []string{"knowledge_qa", "WithBlockID"} {
+		if strings.Contains(out, unexpected) {
+			t.Errorf("markdown --scope keyword must NOT route to qa mix; found %q in: %s", unexpected, out)
+		}
+	}
+}
+
+// TestDryRunFetchV2WholeDocMarkdownStaysMix: with no partial --scope (whole-doc)
+// markdown still flows through the qa mix lane (block-id-anchored md).
+func TestDryRunFetchV2WholeDocMarkdownStaysMix(t *testing.T) {
+	t.Setenv("LARK_CLI_QA_FAAS_URL", "https://faas.example")
+	rt := newFetchScopeRuntime("markdown", "full", "", "")
+	raw, err := json.Marshal(dryRunFetchV2(context.Background(), rt))
+	if err != nil {
+		t.Fatalf("marshal dry-run: %v", err)
+	}
+	out := string(raw)
+	for _, want := range []string{"https://faas.example/knowledge_qa/fetch", "WithBlockID"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("whole-doc markdown should still dispatch to mix; missing %q in: %s", want, out)
+		}
+	}
+}
+
+// TestValidateFetchDetailMarkdownScopeRejectsIds: under a markdown --scope partial
+// read (native docs_ai fragment, no mix anchors) --detail with-ids/full is
+// rejected; whole-doc markdown still accepts them.
+func TestValidateFetchDetailMarkdownScopeRejectsIds(t *testing.T) {
+	t.Parallel()
+	if err := validateFetchDetail(newFetchScopeRuntime("markdown", "keyword", "deploy", "with-ids")); err == nil {
+		t.Error("markdown --scope keyword --detail with-ids should error (native fragment has no block ids)")
+	}
+	if err := validateFetchDetail(newFetchScopeRuntime("markdown", "section", "", "full")); err == nil {
+		t.Error("markdown --scope section --detail full should error")
+	}
+	if err := validateFetchDetail(newFetchScopeRuntime("markdown", "full", "", "with-ids")); err != nil {
+		t.Errorf("whole-doc markdown --detail with-ids should still pass (mix carries ids), got: %v", err)
+	}
+}
+
 func newCreateBodyTestRuntime(ctx context.Context) *common.RuntimeContext {
 	cmd := &cobra.Command{Use: "+create"}
 	cmd.Flags().String("doc-format", "xml", "")
