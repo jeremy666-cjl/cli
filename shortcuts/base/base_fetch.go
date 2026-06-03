@@ -45,13 +45,16 @@ var BaseFetch = common.Shortcut{
 	},
 }
 
-// baseFetchRawInput returns the original string to forward to eqa: the raw URL
-// when given (so ?table= survives), else the bare app_token.
+// baseFetchRawInput returns the URL to forward to eqa. eqa is URL-addressed, so
+// a bare --base-token is expanded into a brand-standard bitable URL (the native
+// `base +record-list` lane is token-addressed and needs no such step). A real
+// --url is forwarded verbatim so ?table= survives to the server.
 func baseFetchRawInput(runtime *common.RuntimeContext) string {
-	if url := strings.TrimSpace(runtime.Str("url")); url != "" {
-		return url
+	urlOrToken := strings.TrimSpace(runtime.Str("url"))
+	if urlOrToken == "" {
+		urlOrToken = strings.TrimSpace(runtime.Str("base-token"))
 	}
-	return strings.TrimSpace(runtime.Str("base-token"))
+	return common.ResourceURLOrBuild(runtime.Brand(), "bitable", urlOrToken)
 }
 
 func validateBaseFetch(ctx context.Context, runtime *common.RuntimeContext) error {

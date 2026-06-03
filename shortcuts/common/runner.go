@@ -74,6 +74,15 @@ func (ctx *RuntimeContext) IsBot() bool {
 // UserOpenId returns the current user's open_id from config.
 func (ctx *RuntimeContext) UserOpenId() string { return ctx.Config.UserOpenId }
 
+// Brand returns the configured Lark brand, defaulting to BrandFeishu when no
+// config is loaded (e.g. in tests). Used to build brand-standard resource URLs.
+func (ctx *RuntimeContext) Brand() core.LarkBrand {
+	if ctx == nil || ctx.Config == nil {
+		return core.BrandFeishu
+	}
+	return ctx.Config.Brand
+}
+
 // Lang returns the user's preference as a canonical locale, or "" if unset or
 // unrecognized; callers choose their own fallback.
 func (ctx *RuntimeContext) Lang() i18n.Lang {

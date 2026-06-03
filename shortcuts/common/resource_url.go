@@ -57,6 +57,26 @@ func BuildResourceURL(brand core.LarkBrand, kind, token string) string {
 	}
 }
 
+// ResourceURLOrBuild normalizes a "URL or bare token" input into a URL suitable
+// for a URL-addressed backend (the qa fetch lane / eqa FetchKnowledgeQa, which
+// only accepts a URL, not a bare token). When input already looks like a URL
+// (contains "://") it is returned unchanged so query params (?sheet=/?table=)
+// and wiki paths survive; otherwise it is treated as a bare token of the given
+// kind and expanded via BuildResourceURL. An unknown kind (BuildResourceURL
+// returns "") falls back to the original input so the backend surfaces a clear
+// error rather than the cli silently guessing. The native token-addressed
+// OpenAPI lanes use the token directly and do not need this.
+func ResourceURLOrBuild(brand core.LarkBrand, kind, input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.Contains(input, "://") {
+		return input
+	}
+	if built := BuildResourceURL(brand, kind, input); built != "" {
+		return built
+	}
+	return input
+}
+
 // ResourceRef holds the parsed type and token from a Lark resource URL.
 type ResourceRef struct {
 	Type  string // e.g. "docx", "bitable", "wiki", "sheet", etc.
