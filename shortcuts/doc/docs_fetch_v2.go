@@ -80,11 +80,21 @@ func validateMarkdownFormat(runtime *common.RuntimeContext) error {
 	return nil
 }
 
+// isWholeDocRead reports whether this fetch reads the whole document (no --scope
+// or --scope full). Only whole-doc markdown routes through the qa fetch service
+// (mix/inline-embeds), which has no partial-read input; any --scope partial read
+// falls through to native docs_ai, which honors read_option for markdown too.
+func isWholeDocRead(runtime *common.RuntimeContext) bool {
+	mode := strings.TrimSpace(runtime.Str("scope"))
+	return mode == "" || mode == "full"
+}
+
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 	format := strings.TrimSpace(runtime.Str("doc-format"))
-	if format == "markdown" {
-		// The markdown lane goes through the qa fetch service: --inline-embeds
+	if format == "markdown" && isWholeDocRead(runtime) {
+		// Whole-doc markdown goes through the qa fetch service: --inline-embeds
 		// expands embeds to GFM, plain markdown gets the "mix" block-id render.
+		// A --scope partial read skips this and dry-runs the native docs_ai path.
 		if runtime.Bool("inline-embeds") {
 			return dryRunInlineEmbeds(runtime)
 		}
@@ -102,12 +112,14 @@ func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.Dr
 }
 
 func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
-	// The markdown lane routes through the qa fetch service: plain markdown →
+	// Whole-doc markdown routes through the qa fetch service: plain markdown →
 	// "mix" (readable md + block-id anchors), --inline-embeds → embeds expanded
-	// to GFM. On any failure the run* helper returns handled=false and we fall
-	// through to the native docs_ai markdown path below — "只增不减".
+	// to GFM. A --scope partial read skips this (eqa has no read_option) and
+	// falls through to native docs_ai, which honors read_option for markdown. On
+	// any qa failure the run* helper returns handled=false and we likewise fall
+	// through to native docs_ai markdown below — "只增不减".
 	format := strings.TrimSpace(runtime.Str("doc-format"))
-	if format == "markdown" {
+	if format == "markdown" && isWholeDocRead(runtime) {
 		if runtime.Bool("inline-embeds") {
 			if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
 				return err
@@ -205,21 +217,22 @@ func buildReadOption(runtime *common.RuntimeContext) map[string]interface{} {
 	return ro
 }
 
-// validateFetchDetail gates --detail by format. Plain markdown now routes
+// validateFetchDetail gates --detail by format. Whole-doc plain markdown routes
 // through the qa "mix" lane, which carries {#blockid} anchors, so with-ids/full
-// are allowed there. Only --doc-format markdown --inline-embeds (the expansion
-// path) has no block ids.
+// are allowed there. A --scope partial read (native docs_ai fragment, no mix
+// anchors) and --doc-format markdown --inline-embeds (the expansion path) both
+// lack block ids, so with-ids/full are rejected there.
 func validateFetchDetail(runtime *common.RuntimeContext) error {
 	format := strings.TrimSpace(runtime.Str("doc-format"))
 	detail := strings.TrimSpace(runtime.Str("detail"))
 	if format == "" || format == "xml" {
 		return nil
 	}
-	if format == "markdown" && !runtime.Bool("inline-embeds") {
+	if format == "markdown" && !runtime.Bool("inline-embeds") && isWholeDocRead(runtime) {
 		return nil
 	}
 	if detail == "with-ids" || detail == "full" {
-		return common.FlagErrorf("--detail %s has no effect with --doc-format markdown --inline-embeds (no block ids); use plain --doc-format markdown or --doc-format xml", detail)
+		return common.FlagErrorf("--detail %s has no block ids with --doc-format markdown here (a --scope partial read or --inline-embeds); use whole-doc --doc-format markdown, or --doc-format xml for an addressable partial read", detail)
 	}
 	return nil
 }

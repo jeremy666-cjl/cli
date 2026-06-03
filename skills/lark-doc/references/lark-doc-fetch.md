@@ -39,7 +39,7 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 | **定位**：需要 block ID 与其他业务交互 | `with-ids` | 包含 block ID（如 `<p id="blkcnXXXX">`），可用于 `+update` 的 `--block-id`，也可用于拼接 `文档URL#block_id` 形式的直达链接 |
 | **编辑**：任何修改文档内容的需求 | `full` | 包含 block ID + 样式属性 + 引用元数据，提供完整文档结构信息 |
 
-> `--detail` 主要作用于 `xml`。`markdown` 自带简单的 `{#blockid}` 块级锚点。
+> `--detail` 主要作用于 `xml`。**整篇** `markdown` 自带简单的 `{#blockid}` 块级锚点；带 `--scope` 的局部读返回原生 `<fragment>` 切片（无 mix 锚点），需要可寻址块 id 时该路改用 `xml`。
 
 ## 选 `--doc-format`（输出格式）
 
@@ -101,7 +101,7 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 
 `content` 的格式由 `--doc-format` 决定。设置 `--scope` 时会被 `<fragment>` 包裹，详见上文"局部读取的输出结构"。
 
-> **`--doc-format markdown`（doc/wiki）**：会渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。内嵌多维表格默认为 id 化占位（要全量展开用 `--inline-embeds`，但展开后无块级 id）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format`（回退时为原生 markdown）标记该路径。
+> **`--doc-format markdown`（doc/wiki）**：会渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。内嵌多维表格默认为 id 化占位（要全量展开用 `--inline-embeds`，但展开后无块级 id）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format`（回退时为原生 markdown）标记该路径。**此渲染仅整篇读取走**；带 `--scope` 的局部读返回原生 `<fragment>` 命中切片（无 mix 锚点、无 `source` 字段），keyword/outline/range/section 均生效，需要可寻址块 id 用 `--doc-format xml --detail with-ids`。
 
 ## 参数
 
