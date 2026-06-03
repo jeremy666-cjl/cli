@@ -106,7 +106,7 @@ Meeting (视频会议)
 >
 > **路由规则**：如果用户在问“开过的会”“今天开了哪些会”“最近参加过什么会”“已结束的会议”“历史会议记录”，优先使用 `vc +search`。只有在查询未来日程、待开的会、agenda 时才优先使用 [lark-calendar](../lark-calendar/SKILL.md)。
 >
-> **妙记边界**：`+notes` 负责纪要内容、逐字稿和 AI 产物；妙记基础信息请优先看 [`+recording`](references/lark-vc-recording.md) 与 [lark-minutes](../lark-minutes/SKILL.md)。
+> **妙记边界**：只想**读 / 总结一篇妙记的内容**（一串可读 markdown：总结 + 章节 + 待办）→ [`minutes +fetch`](../lark-minutes/SKILL.md)；要**结构化纪要字段 / AI 产物，或把逐字稿·纪要落盘成文件** → `+notes --minute-tokens`；妙记基础信息（标题 / 时长 / 封面）看 [`+recording`](references/lark-vc-recording.md) 与 [lark-minutes](../lark-minutes/SKILL.md)。
 >
 > **文件转纪要边界**：如果用户给的是本地音视频文件，并希望得到纪要、逐字稿、总结、待办或章节，入口应先走 [lark-minutes](../lark-minutes/SKILL.md) 的上传流程生成 `minute_url` / `minute_token`，再回到 `vc +notes --minute-tokens` 获取内容产物。
 >

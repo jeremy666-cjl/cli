@@ -9,7 +9,7 @@
 # 获取文档（默认 XML，simple）
 lark-cli docs +fetch --api-version v2 --doc "https://xxx.feishu.cn/docx/Z1Fj...tnAc"
 
-# Markdown 格式
+# Markdown 格式（读 / 总结首选；可读 md + {#blockid} 块级锚点）
 lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc --doc-format markdown
 
 # 带 block ID（用于后续 block 级更新）
@@ -38,6 +38,12 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 | **只读**：浏览或总结文档内容 | `simple`（默认） | 简洁 XML/Markdown，不含 block ID、样式属性、引用元数据 |
 | **定位**：需要 block ID 与其他业务交互 | `with-ids` | 包含 block ID（如 `<p id="blkcnXXXX">`），可用于 `+update` 的 `--block-id`，也可用于拼接 `文档URL#block_id` 形式的直达链接 |
 | **编辑**：任何修改文档内容的需求 | `full` | 包含 block ID + 样式属性 + 引用元数据，提供完整文档结构信息 |
+
+> `--detail` 主要作用于 `xml`。`markdown` 自带简单的 `{#blockid}` 块级锚点。
+
+## 选 `--doc-format`（输出格式）
+
+> **分工**：读用 `markdown`（可读 + 块级锚点，R+W 友好）；要逐块/逐段精确编辑、或要完整结构与样式属性用 `xml`。
 
 ## 选 `--scope`（读取范围）
 
@@ -95,25 +101,25 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 
 `content` 的格式由 `--doc-format` 决定。设置 `--scope` 时会被 `<fragment>` 包裹，详见上文"局部读取的输出结构"。
 
-> **`--doc-format mix`（doc/wiki）**：经问答(eqa) fetch 取「已物化 + 带真实 blockid」的内容，渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。定位「读 + 回链」（模型读到 id 后可精确改某块）。内嵌多维表格在 mix 下为 id 化占位（要全量展开用 `--inline-embeds`）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 同样适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format` 标记该路径。
+> **`--doc-format markdown`（doc/wiki）**：会渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。内嵌多维表格默认为 id 化占位（要全量展开用 `--inline-embeds`，但展开后无块级 id）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format`（回退时为原生 markdown）标记该路径。
 
 ## 参数
 
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| `--api-version` | 是 | 固定传 `v2` |
-| `--doc` | 是 | 文档 URL 或 token（支持 `/docx/` 和 `/wiki/`） |
-| `--doc-format` | 否 | `xml`（默认，保真可寻址）\| `markdown`（纯读最轻）\| `mix`（读+回链：物化 md + 块级 `{#blockid}` 锚点）\| `text` |
-| `--detail` | 否 | `simple`（默认）\| `with-ids` \| `full` |
-| `--revision-id` | 否 | 文档版本号，`-1` = 最新（默认） |
-| `--scope` | 否 | `outline` \| `range` \| `keyword` \| `section`（省略 = 读整篇） |
-| `--start-block-id` | 否 | `range`/`section` 起始/锚点 id（`section` 必填） |
-| `--end-block-id` | 否 | `range` 结束 id；`-1` 表示读到末尾 |
-| `--keyword` | 否 | `keyword` 模式关键词，**4 层自动 fallback**（子串 → 归一化 → 分词形变 → RE2 正则）；`\|` 分隔多分支 OR |
-| `--context-before` | 否 | 命中前拉几个兄弟块（仅对顶层单元生效，默认 `0`） |
-| `--context-after` | 否 | 命中后拉几个兄弟块（仅对顶层单元生效，默认 `0`） |
-| `--max-depth` | 否 | `outline` = 标题层级上限；其它 = 子树深度（`-1` 不限，默认） |
-| `--format` | 否 | `json`（默认）\| `pretty` |
+| 参数 | 必填 | 说明                                                                                                      |
+|------|------|---------------------------------------------------------------------------------------------------------|
+| `--api-version` | 是 | 固定传 `v2`                                                                                                |
+| `--doc` | 是 | 文档 URL 或 token（支持 `/docx/` 和 `/wiki/`）                                                                  |
+| `--doc-format` | 否 | `xml`（默认，保真可寻址，配 `--detail` 给全量 block id）\| `markdown`（读友好：markdown + 简单`{#blockid}`锚点；加 `--inline-embeds` 展开内嵌多维表） |
+| `--detail` | 否 | `simple`（默认）\| `with-ids` \| `full`                                                                     |
+| `--revision-id` | 否 | 文档版本号，`-1` = 最新（默认）                                                                                     |
+| `--scope` | 否 | `outline` \| `range` \| `keyword` \| `section`（省略 = 读整篇）                                                |
+| `--start-block-id` | 否 | `range`/`section` 起始/锚点 id（`section` 必填）                                                                |
+| `--end-block-id` | 否 | `range` 结束 id；`-1` 表示读到末尾                                                                               |
+| `--keyword` | 否 | `keyword` 模式关键词，**4 层自动 fallback**（子串 → 归一化 → 分词形变 → RE2 正则）；`\|` 分隔多分支 OR                              |
+| `--context-before` | 否 | 命中前拉几个兄弟块（仅对顶层单元生效，默认 `0`）                                                                              |
+| `--context-after` | 否 | 命中后拉几个兄弟块（仅对顶层单元生效，默认 `0`）                                                                              |
+| `--max-depth` | 否 | `outline` = 标题层级上限；其它 = 子树深度（`-1` 不限，默认）                                                                |
+| `--format` | 否 | `json`（默认）\| `pretty`                                                                                   |
 
 ## 图片、文件、画板的处理
 

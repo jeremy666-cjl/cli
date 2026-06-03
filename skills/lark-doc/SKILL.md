@@ -28,6 +28,7 @@ lark-cli docs +update --api-version v2 --doc "文档URL或token" --command appen
 **未读完以上文件就执行相应操作会导致参数选择错误、格式错误或样式不达标。**
 
 > **格式选择规则（全局）：**
+> - **读取 / 浏览 / 总结场景**（`docs +fetch`）：意图是**读内容 / 总结 **时，优先用markdown（`--doc-format markdown`）—— 该格式会给标题/表/图/画板挂 `{#blockid}` 锚点；文档含内嵌多维表又要其数据时，加 `--inline-embeds` 把内嵌表展成 GFM。
 > - **创建 / 导入场景**（`docs +create`，或 `docs +update --command append/overwrite` 的整段写入）：XML 和 Markdown 都可以。用户提供 `.md` 本地文件、或明确说"导入 Markdown"时，直接用 Markdown；否则默认 XML（可用 callout、grid、checkbox 等富 block）。
 > - **精准编辑场景**（`docs +update` 的 `str_replace` / `block_insert_after` / `block_replace` / `block_delete` / `block_move_after` 等局部精修指令）：优先使用 XML（`--doc-format xml`，即默认值）。XML 能稳定表达 block 结构和样式，局部精修更可控；不要因为 Markdown 更简单就自行切换。
 

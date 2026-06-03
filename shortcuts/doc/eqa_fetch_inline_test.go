@@ -35,15 +35,14 @@ func TestValidateInlineEmbeds(t *testing.T) {
 	if err := validateInlineEmbeds(newRT("xml", true, 50)); err == nil {
 		t.Error("inline-embeds + xml should error")
 	}
-	if err := validateInlineEmbeds(newRT("markdown", true, -1)); err == nil {
-		t.Error("negative embed-max-rows should error")
-	}
 	if err := validateInlineEmbeds(newRT("markdown", true, 50)); err != nil {
 		t.Errorf("inline-embeds + markdown should pass, got: %v", err)
 	}
 	if err := validateInlineEmbeds(newRT("xml", false, 50)); err != nil {
 		t.Errorf("without inline-embeds should pass regardless of format, got: %v", err)
 	}
+	// --embed-max-rows validation now lives in validateMarkdownFormat (covers
+	// both the mix and inline-embeds sub-paths); see TestValidateMarkdownFormat.
 }
 
 // TestInlineEmbedsFallsBackWhenFaasUnset verifies the "只增不减" guarantee: with
