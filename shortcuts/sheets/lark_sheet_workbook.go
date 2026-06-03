@@ -13,9 +13,9 @@ import (
 
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/extension/fileio"
 	"github.com/larksuite/cli/internal/client"
-	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/util"
 	"github.com/larksuite/cli/internal/validate"
 	"github.com/larksuite/cli/shortcuts/common"
@@ -122,13 +122,13 @@ var SheetCreate = common.Shortcut{
 
 func sheetCreateInput(runtime flagView, token string) (map[string]interface{}, error) {
 	if strings.TrimSpace(runtime.Str("title")) == "" {
-		return nil, common.FlagErrorf("--title is required")
+		return nil, common.ValidationErrorf("--title is required")
 	}
 	if n := runtime.Int("row-count"); n < 0 || n > 50000 {
-		return nil, common.FlagErrorf("--row-count must be between 0 and 50000")
+		return nil, common.ValidationErrorf("--row-count must be between 0 and 50000")
 	}
 	if n := runtime.Int("col-count"); n < 0 || n > 200 {
-		return nil, common.FlagErrorf("--col-count must be between 0 and 200")
+		return nil, common.ValidationErrorf("--col-count must be between 0 and 200")
 	}
 	input := map[string]interface{}{
 		"excel_id":   token,
@@ -167,7 +167,7 @@ func sheetRenameInput(runtime flagView, token, sheetID, sheetName string) (map[s
 		return nil, err
 	}
 	if strings.TrimSpace(runtime.Str("title")) == "" {
-		return nil, common.FlagErrorf("--title is required")
+		return nil, common.ValidationErrorf("--title is required")
 	}
 	input := map[string]interface{}{
 		"excel_id":  token,
@@ -192,7 +192,7 @@ func sheetSetTabColorInput(runtime flagView, token, sheetID, sheetName string) (
 		return nil, err
 	}
 	if !runtime.Changed("color") {
-		return nil, common.FlagErrorf("--color is required (empty string clears)")
+		return nil, common.ValidationErrorf("--color is required (empty string clears)")
 	}
 	input := map[string]interface{}{
 		"excel_id":  token,
@@ -311,13 +311,13 @@ var SheetMove = common.Shortcut{
 			return err
 		}
 		if !runtime.Changed("index") {
-			return common.FlagErrorf("--index is required")
+			return common.ValidationErrorf("--index is required")
 		}
 		if runtime.Int("index") < 0 {
-			return common.FlagErrorf("--index must be >= 0")
+			return common.ValidationErrorf("--index must be >= 0")
 		}
 		if runtime.Changed("source-index") && runtime.Int("source-index") < 0 {
-			return common.FlagErrorf("--source-index must be >= 0")
+			return common.ValidationErrorf("--source-index must be >= 0")
 		}
 		return nil
 	},
@@ -561,7 +561,7 @@ var WorkbookCreate = common.Shortcut{
 	Flags:       flagsFor("+workbook-create"),
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
 		if strings.TrimSpace(runtime.Str("title")) == "" {
-			return common.FlagErrorf("--title is required")
+			return common.ValidationErrorf("--title is required")
 		}
 		if runtime.Str("headers") != "" {
 			v, err := parseJSONFlag(runtime, "headers")
@@ -569,7 +569,7 @@ var WorkbookCreate = common.Shortcut{
 				return err
 			}
 			if _, ok := v.([]interface{}); !ok {
-				return common.FlagErrorf("--headers must be a JSON array")
+				return common.ValidationErrorf("--headers must be a JSON array")
 			}
 		}
 		if runtime.Str("values") != "" {
@@ -579,11 +579,11 @@ var WorkbookCreate = common.Shortcut{
 			}
 			rows, ok := v.([]interface{})
 			if !ok {
-				return common.FlagErrorf("--values must be a JSON 2D array")
+				return common.ValidationErrorf("--values must be a JSON 2D array")
 			}
 			for i, r := range rows {
 				if _, ok := r.([]interface{}); !ok {
-					return common.FlagErrorf("--values[%d] must be an array", i)
+					return common.ValidationErrorf("--values[%d] must be an array", i)
 				}
 			}
 		}
@@ -613,7 +613,7 @@ var WorkbookCreate = common.Shortcut{
 		if v := strings.TrimSpace(runtime.Str("folder-token")); v != "" {
 			body["folder_token"] = v
 		}
-		data, err := runtime.CallAPI("POST", "/open-apis/sheets/v3/spreadsheets", nil, body)
+		data, err := runtime.CallAPITyped("POST", "/open-apis/sheets/v3/spreadsheets", nil, body)
 		if err != nil {
 			return err
 		}
@@ -623,7 +623,7 @@ var WorkbookCreate = common.Shortcut{
 			token = common.GetString(ss, "token")
 		}
 		if token == "" {
-			return output.Errorf(output.ExitAPI, "api_error", "spreadsheet created but token missing in response")
+			return errs.NewInternalError(errs.SubtypeInvalidResponse, "spreadsheet created but token missing in response")
 		}
 
 		result := map[string]interface{}{"spreadsheet": ss}
@@ -665,19 +665,9 @@ var WorkbookCreate = common.Shortcut{
 // not. The new spreadsheet_token is surfaced in the error detail so callers can
 // retry the fill (+cells-set / +csv-put) or delete the orphan, instead of only
 // finding the token interpolated into a bare error string.
-func workbookCreatedButFillFailed(token string, spreadsheet interface{}, reason string) error {
-	return &output.ExitError{
-		Code: output.ExitAPI,
-		Detail: &output.ErrDetail{
-			Type:    "partial_success",
-			Message: fmt.Sprintf("spreadsheet %s created but %s", token, reason),
-			Hint:    "the spreadsheet exists; retry the fill with the returned spreadsheet_token, or delete it",
-			Detail: map[string]interface{}{
-				"spreadsheet_token": token,
-				"spreadsheet":       spreadsheet,
-			},
-		},
-	}
+func workbookCreatedButFillFailed(token string, _ interface{}, reason string) error {
+	return errs.NewInternalError(errs.SubtypeSDKError, "spreadsheet %s created but %s", token, reason).
+		WithHint("the spreadsheet exists; retry the fill with the returned spreadsheet_token, or delete it")
 }
 
 // buildInitialFillInput zips --headers + --values into a single set_cell_range
@@ -765,7 +755,7 @@ var WorkbookExport = common.Shortcut{
 			ext = "xlsx"
 		}
 		if ext == "csv" && strings.TrimSpace(runtime.Str("sheet-id")) == "" {
-			return common.FlagErrorf("--sheet-id is required when --file-extension=csv")
+			return common.ValidationErrorf("--sheet-id is required when --file-extension=csv")
 		}
 		return nil
 	},
@@ -813,13 +803,13 @@ var WorkbookExport = common.Shortcut{
 		if sid := strings.TrimSpace(runtime.Str("sheet-id")); sid != "" {
 			body["sub_id"] = sid
 		}
-		taskData, err := runtime.CallAPI("POST", "/open-apis/drive/v1/export_tasks", nil, body)
+		taskData, err := runtime.CallAPITyped("POST", "/open-apis/drive/v1/export_tasks", nil, body)
 		if err != nil {
 			return err
 		}
 		ticket := common.GetString(taskData, "ticket")
 		if ticket == "" {
-			return output.Errorf(output.ExitAPI, "api_error", "export task created but ticket missing")
+			return errs.NewInternalError(errs.SubtypeInvalidResponse, "export task created but ticket missing")
 		}
 
 		result := map[string]interface{}{
@@ -847,9 +837,9 @@ var WorkbookExport = common.Shortcut{
 				continue
 			default: // any non-zero status outside the in-progress window is a failure
 				if status.JobErrorMsg != "" {
-					return output.Errorf(output.ExitAPI, "api_error", "export task %s failed: %s", ticket, status.JobErrorMsg)
+					return errs.NewAPIError(errs.SubtypeServerError, "export task %s failed: %s", ticket, status.JobErrorMsg)
 				}
-				return output.Errorf(output.ExitAPI, "api_error", "export task %s failed with job_status=%d", ticket, status.JobStatus)
+				return errs.NewAPIError(errs.SubtypeServerError, "export task %s failed with job_status=%d", ticket, status.JobStatus)
 			}
 		}
 		if fileToken == "" {
@@ -887,7 +877,7 @@ type exportTaskStatus struct {
 }
 
 func pollExportTask(runtime *common.RuntimeContext, token, ticket string) (exportTaskStatus, error) {
-	data, err := runtime.CallAPI(
+	data, err := runtime.CallAPITyped(
 		"GET",
 		fmt.Sprintf("/open-apis/drive/v1/export_tasks/%s", validate.EncodePathSegment(ticket)),
 		map[string]interface{}{"token": token},
@@ -898,7 +888,7 @@ func pollExportTask(runtime *common.RuntimeContext, token, ticket string) (expor
 	}
 	result := common.GetMap(data, "result")
 	if result == nil {
-		return exportTaskStatus{}, output.Errorf(output.ExitAPI, "api_error", "export task %s: empty result", ticket)
+		return exportTaskStatus{}, errs.NewInternalError(errs.SubtypeInvalidResponse, "export task %s: empty result", ticket)
 	}
 	js, _ := util.ToFloat64(result["job_status"])
 	fs, _ := util.ToFloat64(result["file_size"])
@@ -918,10 +908,10 @@ func downloadExportFile(ctx context.Context, runtime *common.RuntimeContext, fil
 		ApiPath:    fmt.Sprintf("/open-apis/drive/v1/export_tasks/file/%s/download", validate.EncodePathSegment(fileToken)),
 	}, larkcore.WithFileDownload())
 	if err != nil {
-		return "", output.ErrNetwork("download failed: %s", err)
+		return "", sheetsDownloadRequestError(err)
 	}
 	if apiResp.StatusCode >= 400 {
-		return "", output.ErrNetwork("download failed: HTTP %d: %s", apiResp.StatusCode, string(apiResp.RawBody))
+		return "", sheetsDownloadHTTPStatusError(apiResp)
 	}
 	target := outPath
 	if info, statErr := runtime.FileIO().Stat(outPath); statErr == nil && info.IsDir() {
@@ -935,13 +925,64 @@ func downloadExportFile(ctx context.Context, runtime *common.RuntimeContext, fil
 		ContentType:   apiResp.Header.Get("Content-Type"),
 		ContentLength: int64(len(apiResp.RawBody)),
 	}, strings.NewReader(string(apiResp.RawBody))); err != nil {
-		return "", common.WrapSaveErrorByCategory(err, "io")
+		return "", common.WrapSaveErrorTyped(err)
 	}
 	resolved, _ := runtime.FileIO().ResolvePath(target)
 	if resolved == "" {
 		resolved = target
 	}
 	return resolved, nil
+}
+
+func sheetsDownloadRequestError(err error) error {
+	if _, ok := errs.ProblemOf(err); ok {
+		return err
+	}
+	return errs.NewNetworkError(errs.SubtypeNetworkTransport, "download failed: %s", err).WithCause(err)
+}
+
+func sheetsDownloadHTTPStatusError(resp *larkcore.ApiResp) error {
+	status := resp.StatusCode
+	body := strings.TrimSpace(string(resp.RawBody))
+	if body == "" {
+		body = http.StatusText(status)
+	}
+	logID := sheetsDownloadResponseLogID(resp)
+	if status >= http.StatusInternalServerError {
+		err := errs.NewNetworkError(errs.SubtypeNetworkServer, "download failed: HTTP %d: %s", status, body).
+			WithCode(status).
+			WithRetryable()
+		if logID != "" {
+			err = err.WithLogID(logID)
+		}
+		return err
+	}
+	if status == http.StatusTooManyRequests {
+		err := errs.NewAPIError(errs.SubtypeRateLimit, "download failed: HTTP %d: %s", status, body).
+			WithCode(status).
+			WithRetryable()
+		if logID != "" {
+			err = err.WithLogID(logID)
+		}
+		return err
+	}
+	subtype := errs.SubtypeUnknown
+	if status == http.StatusNotFound {
+		subtype = errs.SubtypeNotFound
+	}
+	err := errs.NewAPIError(subtype, "download failed: HTTP %d: %s", status, body).WithCode(status)
+	if logID != "" {
+		err = err.WithLogID(logID)
+	}
+	return err
+}
+
+func sheetsDownloadResponseLogID(resp *larkcore.ApiResp) string {
+	logID := strings.TrimSpace(resp.Header.Get(larkcore.HttpHeaderKeyLogId))
+	if logID == "" {
+		logID = strings.TrimSpace(resp.Header.Get(larkcore.HttpHeaderKeyRequestId))
+	}
+	return logID
 }
 
 // lookupSheetIndex finds a sub-sheet by id or name and returns its canonical
@@ -956,7 +997,7 @@ func lookupSheetIndex(ctx context.Context, runtime *common.RuntimeContext, token
 	}
 	m, ok := out.(map[string]interface{})
 	if !ok {
-		return "", 0, output.Errorf(output.ExitAPI, "tool_output", "get_workbook_structure returned non-object output")
+		return "", 0, errs.NewInternalError(errs.SubtypeInvalidResponse, "get_workbook_structure returned non-object output")
 	}
 	sheets, _ := m["sheets"].([]interface{})
 	for _, raw := range sheets {
@@ -975,7 +1016,7 @@ func lookupSheetIndex(ctx context.Context, runtime *common.RuntimeContext, token
 		if (sheetID != "" && id == sheetID) || (sheetName != "" && name == sheetName) {
 			idx, ok := util.ToFloat64(sm["index"])
 			if !ok {
-				return "", 0, output.Errorf(output.ExitAPI, "tool_output", "sheet entry missing index field")
+				return "", 0, errs.NewInternalError(errs.SubtypeInvalidResponse, "sheet entry missing index field")
 			}
 			return id, int(idx), nil
 		}
@@ -984,7 +1025,7 @@ func lookupSheetIndex(ctx context.Context, runtime *common.RuntimeContext, token
 	if target == "" {
 		target = sheetName
 	}
-	return "", 0, output.Errorf(output.ExitAPI, "not_found", fmt.Sprintf("sheet %q not found in workbook", target))
+	return "", 0, errs.NewValidationError(errs.SubtypeFailedPrecondition, "sheet %q not found in workbook", target)
 }
 
 // lookupFirstSheetID returns the sheet_id of the sub-sheet at index 0 (the
@@ -1001,7 +1042,7 @@ func lookupFirstSheetID(ctx context.Context, runtime *common.RuntimeContext, tok
 	}
 	m, ok := out.(map[string]interface{})
 	if !ok {
-		return "", output.Errorf(output.ExitAPI, "tool_output", "get_workbook_structure returned non-object output")
+		return "", errs.NewInternalError(errs.SubtypeInvalidResponse, "get_workbook_structure returned non-object output")
 	}
 	sheets, _ := m["sheets"].([]interface{})
 	bestID := ""
@@ -1029,7 +1070,7 @@ func lookupFirstSheetID(ctx context.Context, runtime *common.RuntimeContext, tok
 		}
 	}
 	if bestID == "" {
-		return "", output.Errorf(output.ExitAPI, "tool_output", "get_workbook_structure returned no sheets")
+		return "", errs.NewInternalError(errs.SubtypeInvalidResponse, "get_workbook_structure returned no sheets")
 	}
 	return bestID, nil
 }

@@ -5,7 +5,6 @@ package markdown
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/validate"
 	"github.com/larksuite/cli/shortcuts/common"
@@ -65,7 +65,7 @@ type markdownDiffHunkRange struct {
 
 func validateMarkdownDiffSpec(runtime *common.RuntimeContext, spec markdownDiffSpec) error {
 	if err := validate.ResourceName(spec.FileToken, "--file-token"); err != nil {
-		return output.ErrValidation("%s", err)
+		return markdownValidationParamError("--file-token", "%s", err).WithCause(err)
 	}
 	if spec.FromVersion != "" {
 		if err := validateMarkdownDiffVersionValue(spec.FromVersion, "--from-version"); err != nil {
@@ -79,29 +79,29 @@ func validateMarkdownDiffSpec(runtime *common.RuntimeContext, spec markdownDiffS
 	}
 	if spec.FilePath != "" {
 		if _, err := validate.SafeInputPath(spec.FilePath); err != nil {
-			return output.ErrValidation("unsafe file path: %s", err)
+			return markdownValidationParamError("--file", "unsafe file path: %s", err).WithCause(err)
 		}
 		if err := validateMarkdownFileName(spec.FilePath, "--file"); err != nil {
 			return err
 		}
 	}
 	if spec.ContextLines < 0 {
-		return output.ErrValidation("--context-lines must be >= 0")
+		return markdownValidationParamError("--context-lines", "--context-lines must be >= 0")
 	}
 	if spec.Format != "" && spec.Format != "json" && spec.Format != "pretty" {
-		return output.ErrValidation("markdown +diff only supports --format json or pretty")
+		return markdownValidationParamError("--format", "markdown +diff only supports --format json or pretty")
 	}
 	if spec.FilePath == "" {
 		if spec.FromVersion == "" && spec.ToVersion == "" {
-			return common.FlagErrorf("specify --from-version, or both --from-version and --to-version, or use --file for remote vs local diff")
+			return markdownValidationError("specify --from-version, or both --from-version and --to-version, or use --file for remote vs local diff")
 		}
 		if spec.FromVersion == "" && spec.ToVersion != "" {
-			return common.FlagErrorf("--to-version requires --from-version")
+			return markdownValidationParamError("--to-version", "--to-version requires --from-version")
 		}
 		return nil
 	}
 	if spec.ToVersion != "" {
-		return common.FlagErrorf("--to-version is not supported together with --file")
+		return markdownValidationParamError("--to-version", "--to-version is not supported together with --file")
 	}
 	return nil
 }
@@ -109,10 +109,10 @@ func validateMarkdownDiffSpec(runtime *common.RuntimeContext, spec markdownDiffS
 func validateMarkdownDiffVersionValue(value, flagName string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return output.ErrValidation("%s cannot be empty", flagName)
+		return markdownValidationParamError(flagName, "%s cannot be empty", flagName)
 	}
 	if !markdownDiffVersionRe.MatchString(value) {
-		return output.ErrValidation("%s must be a numeric version string", flagName)
+		return markdownValidationParamError(flagName, "%s must be a numeric version string", flagName)
 	}
 	return nil
 }
@@ -178,17 +178,16 @@ func downloadMarkdownContent(ctx context.Context, runtime *common.RuntimeContext
 func readMarkdownLocalFile(runtime *common.RuntimeContext, filePath string) (string, error) {
 	f, err := runtime.FileIO().Open(filePath)
 	if err != nil {
-		return "", common.WrapInputStatError(err)
+		return "", common.WrapInputStatErrorTyped(err)
 	}
 	defer f.Close()
 
 	payload, err := readMarkdownDiffPayload(f, "local Markdown file")
 	if err != nil {
-		var exitErr *output.ExitError
-		if errors.As(err, &exitErr) {
+		if _, ok := errs.ProblemOf(err); ok {
 			return "", err
 		}
-		return "", output.ErrValidation("cannot read file: %s", err)
+		return "", markdownValidationError("cannot read file: %s", err).WithCause(err)
 	}
 	return string(payload), nil
 }
@@ -199,7 +198,7 @@ func readMarkdownDiffPayload(r io.Reader, source string) ([]byte, error) {
 		return nil, err
 	}
 	if len(payload) > markdownDiffMaxContentBytes {
-		return nil, output.ErrValidation("%s exceeds %s markdown +diff content limit", source, common.FormatSize(markdownDiffMaxContentBytes))
+		return nil, markdownValidationError("%s exceeds %s markdown +diff content limit", source, common.FormatSize(markdownDiffMaxContentBytes))
 	}
 	return payload, nil
 }

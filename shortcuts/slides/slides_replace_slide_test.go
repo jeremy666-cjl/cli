@@ -5,14 +5,13 @@ package slides
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/httpmock"
-	"github.com/larksuite/cli/internal/output"
 )
 
 // TestReplaceSlideBlockReplaceInjectsID is the core regression: users write
@@ -631,15 +630,15 @@ func TestReplaceSlide3350001ErrorEnrichment(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for 3350001")
 			}
-			var exitErr *output.ExitError
-			if !errors.As(err, &exitErr) || exitErr.Detail == nil {
-				t.Fatalf("expected ExitError with Detail, got %v", err)
+			p, ok := errs.ProblemOf(err)
+			if !ok {
+				t.Fatalf("expected a typed errs.* error, got %v", err)
 			}
-			if exitErr.Detail.Code != 3350001 {
-				t.Fatalf("expected code 3350001, got %d", exitErr.Detail.Code)
+			if p.Code != 3350001 {
+				t.Fatalf("expected code 3350001, got %d", p.Code)
 			}
-			if !strings.Contains(exitErr.Detail.Hint, tt.wantHint) {
-				t.Fatalf("hint = %q, want substring %q", exitErr.Detail.Hint, tt.wantHint)
+			if !strings.Contains(p.Hint, tt.wantHint) {
+				t.Fatalf("hint = %q, want substring %q", p.Hint, tt.wantHint)
 			}
 		})
 	}
@@ -670,17 +669,17 @@ func TestReplaceSlideNon3350001ErrorNotEnriched(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var exitErr *output.ExitError
-	if !errors.As(err, &exitErr) || exitErr.Detail == nil {
-		t.Fatalf("expected ExitError, got %v", err)
+	p, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("expected a typed errs.* error, got %v", err)
 	}
-	if exitErr.Detail.Code != 99991672 {
-		t.Fatalf("expected code 99991672, got %d", exitErr.Detail.Code)
+	if p.Code != 99991672 {
+		t.Fatalf("expected code 99991672, got %d", p.Code)
 	}
 	// Non-3350001 errors must not have the slides-specific hint attached.
 	// Assert the actual hint is not our 3350001 checklist, rather than a
 	// string the hint never emits.
-	if strings.Contains(exitErr.Detail.Hint, "common causes") {
-		t.Fatalf("non-3350001 error should not get slides-specific hint, got %q", exitErr.Detail.Hint)
+	if strings.Contains(p.Hint, "common causes") {
+		t.Fatalf("non-3350001 error should not get slides-specific hint, got %q", p.Hint)
 	}
 }

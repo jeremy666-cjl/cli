@@ -16,12 +16,25 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/internal/errclass"
 	"github.com/larksuite/cli/internal/httpmock"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 )
+
+// wikiTestLockContentionErr builds the typed API error that runtime.CallAPITyped
+// produces for a wiki write-lock-contention response (code 131009), so the
+// retry path's errs.ProblemOf(...).Code check sees the same shape in tests as
+// in production.
+func wikiTestLockContentionErr() error {
+	return errclass.BuildAPIError(
+		map[string]any{"code": float64(output.LarkErrWikiLockContention), "msg": "lock contention"},
+		errclass.ClassifyContext{},
+	)
+}
 
 type fakeWikiNodeCreateCall struct {
 	SpaceID string
@@ -785,7 +798,7 @@ func TestWikiNodeURL(t *testing.T) {
 func TestRunWikiNodeCreateRetriesOnLockContention(t *testing.T) {
 	t.Parallel()
 
-	lockErr := output.ErrAPI(output.LarkErrWikiLockContention, "lock contention", nil)
+	lockErr := wikiTestLockContentionErr()
 
 	client := &fakeWikiNodeCreateClient{
 		spaces: map[string]*wikiSpaceRecord{
@@ -831,7 +844,7 @@ func TestRunWikiNodeCreateRetriesOnLockContention(t *testing.T) {
 func TestRunWikiNodeCreateRetriesExhausted(t *testing.T) {
 	t.Parallel()
 
-	lockErr := output.ErrAPI(output.LarkErrWikiLockContention, "lock contention", nil)
+	lockErr := wikiTestLockContentionErr()
 
 	client := &fakeWikiNodeCreateClient{
 		spaces: map[string]*wikiSpaceRecord{
@@ -853,25 +866,30 @@ func TestRunWikiNodeCreateRetriesExhausted(t *testing.T) {
 	if len(client.createInvoked) != 3 {
 		t.Fatalf("create invoked %d times, want 3", len(client.createInvoked))
 	}
-	var exitErr *output.ExitError
-	if !errors.As(err, &exitErr) || exitErr.Detail == nil {
-		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	p, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("expected a typed errs.* error, got %T: %v", err, err)
 	}
-	if exitErr.Detail.Code != output.LarkErrWikiLockContention {
-		t.Fatalf("error code = %d, want %d", exitErr.Detail.Code, output.LarkErrWikiLockContention)
+	if p.Code != output.LarkErrWikiLockContention {
+		t.Fatalf("error code = %d, want %d", p.Code, output.LarkErrWikiLockContention)
 	}
-	if !strings.Contains(exitErr.Detail.Hint, "failed after 2 retries") {
-		t.Fatalf("hint = %q, want retry exhaustion message", exitErr.Detail.Hint)
+	if !strings.Contains(p.Hint, "failed after 2 retries") {
+		t.Fatalf("hint = %q, want retry exhaustion message", p.Hint)
 	}
-	if !strings.Contains(exitErr.Detail.Hint, "lock contention") {
-		t.Fatalf("hint = %q, want original classification hint preserved", exitErr.Detail.Hint)
+	if !strings.Contains(p.Hint, "lock contention") {
+		t.Fatalf("hint = %q, want original classification hint preserved", p.Hint)
 	}
 }
 
 func TestRunWikiNodeCreateNoRetryOnNonContentionError(t *testing.T) {
 	t.Parallel()
 
-	otherErr := output.ErrAPI(output.LarkErrRateLimit, "rate limit", nil) // rate limit, not lock contention
+	// A typed API error for a different code (rate limit, not lock contention),
+	// mirroring what runtime.CallAPITyped produces.
+	otherErr := errclass.BuildAPIError(
+		map[string]any{"code": float64(output.LarkErrRateLimit), "msg": "rate limit"},
+		errclass.ClassifyContext{},
+	)
 
 	client := &fakeWikiNodeCreateClient{
 		spaces: map[string]*wikiSpaceRecord{
@@ -901,7 +919,7 @@ func TestRunWikiNodeCreateNoRetryOnNonContentionError(t *testing.T) {
 func TestRunWikiNodeCreateRetriesOnFirstLockThenSucceeds(t *testing.T) {
 	t.Parallel()
 
-	lockErr := output.ErrAPI(output.LarkErrWikiLockContention, "lock contention", nil)
+	lockErr := wikiTestLockContentionErr()
 
 	client := &fakeWikiNodeCreateClient{
 		spaces: map[string]*wikiSpaceRecord{
@@ -944,7 +962,7 @@ func TestRunWikiNodeCreateRetriesOnFirstLockThenSucceeds(t *testing.T) {
 func TestRunWikiNodeCreateRetryContextCancelled(t *testing.T) {
 	t.Parallel()
 
-	lockErr := output.ErrAPI(output.LarkErrWikiLockContention, "lock contention", nil)
+	lockErr := wikiTestLockContentionErr()
 
 	client := &fakeWikiNodeCreateClient{
 		spaces: map[string]*wikiSpaceRecord{

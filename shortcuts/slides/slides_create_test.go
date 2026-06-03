@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/httpmock"
@@ -400,15 +401,21 @@ func TestSlidesCreateWithSlidesPartialFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for partial failure, got nil")
 	}
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, "pres_partial") {
-		t.Fatalf("error should contain presentation ID, got: %s", errMsg)
+	p, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("expected a typed errs.* error, got %v", err)
 	}
-	if !strings.Contains(errMsg, "slide 2/2") {
-		t.Fatalf("error should indicate slide 2/2 failed, got: %s", errMsg)
+	// The presentation was created but a slide add failed; the recovery hint
+	// carries the partial-progress context (which presentation exists, how many
+	// slides landed) so the caller can resume without recreating.
+	if !strings.Contains(p.Hint, "pres_partial") {
+		t.Fatalf("hint should contain presentation ID, got: %s", p.Hint)
 	}
-	if !strings.Contains(errMsg, "1 slide(s) added") {
-		t.Fatalf("error should report 1 slide added before failure, got: %s", errMsg)
+	if !strings.Contains(p.Hint, "slide 2/2") {
+		t.Fatalf("hint should indicate slide 2/2 failed, got: %s", p.Hint)
+	}
+	if !strings.Contains(p.Hint, "1 slide(s) added") {
+		t.Fatalf("hint should report 1 slide added before failure, got: %s", p.Hint)
 	}
 }
 

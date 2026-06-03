@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -15,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/credential"
 	"github.com/larksuite/cli/internal/httpmock"
-	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
@@ -837,7 +836,7 @@ func TestPollWikiMoveTaskWrapsRepeatedPollFailuresWithHint(t *testing.T) {
 
 	runtime, stderr := newWikiMoveRuntimeWithScopes(t, core.AsUser, "")
 	client := &fakeWikiMoveClient{
-		taskErrs: []error{output.ErrWithHint(output.ExitAPI, "api_error", "poll failed", "retry original")},
+		taskErrs: []error{errs.NewAPIError(errs.SubtypeServerError, "poll failed").WithHint("retry original")},
 	}
 
 	status, ready, err := pollWikiMoveTask(context.Background(), client, runtime, "task_123")
@@ -850,12 +849,12 @@ func TestPollWikiMoveTaskWrapsRepeatedPollFailuresWithHint(t *testing.T) {
 	if status.TaskID != "task_123" {
 		t.Fatalf("status.TaskID = %q, want %q", status.TaskID, "task_123")
 	}
-	var exitErr *output.ExitError
-	if !errors.As(err, &exitErr) || exitErr.Detail == nil {
-		t.Fatalf("expected structured exit error, got %T %v", err, err)
+	p, ok := errs.ProblemOf(err)
+	if !ok {
+		t.Fatalf("expected a typed errs.* error, got %T %v", err, err)
 	}
-	if !strings.Contains(exitErr.Detail.Hint, "retry original") || !strings.Contains(exitErr.Detail.Hint, wikiMoveTaskResultCommand("task_123", core.AsUser)) {
-		t.Fatalf("hint = %q, want original hint and resume command", exitErr.Detail.Hint)
+	if !strings.Contains(p.Hint, "retry original") || !strings.Contains(p.Hint, wikiMoveTaskResultCommand("task_123", core.AsUser)) {
+		t.Fatalf("hint = %q, want original hint and resume command", p.Hint)
 	}
 	if !strings.Contains(stderr.String(), "Wiki move status attempt 1/1 failed") {
 		t.Fatalf("stderr = %q, want poll failure log", stderr.String())

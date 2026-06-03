@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/httpmock"
 	"github.com/larksuite/cli/internal/output"
@@ -214,18 +215,18 @@ func TestMarkdownDiffRejectsOversizedLocalContent(t *testing.T) {
 }
 
 func TestMarkdownDownloadErrorPreservesStructuredErrors(t *testing.T) {
-	apiErr := output.ErrAPI(99991663, "permission denied", map[string]interface{}{"permission": "drive:file:download"})
+	apiErr := errs.NewAPIError(errs.SubtypePermissionDenied, "permission denied").WithCode(99991663)
 	if got := wrapMarkdownDownloadError(apiErr); got != apiErr {
 		t.Fatalf("wrapMarkdownDownloadError() = %v, want original API error", got)
 	}
 
 	got := wrapMarkdownDownloadError(errors.New("dial tcp timeout"))
-	var exitErr *output.ExitError
-	if !errors.As(got, &exitErr) {
-		t.Fatalf("wrapMarkdownDownloadError() = %T, want *output.ExitError", got)
+	problem, ok := errs.ProblemOf(got)
+	if !ok {
+		t.Fatalf("wrapMarkdownDownloadError() = %T, want typed problem", got)
 	}
-	if exitErr.Code != output.ExitNetwork {
-		t.Fatalf("exit code = %d, want %d", exitErr.Code, output.ExitNetwork)
+	if problem.Category != errs.CategoryNetwork || problem.Subtype != errs.SubtypeNetworkTransport {
+		t.Fatalf("problem = %s/%s, want %s/%s", problem.Category, problem.Subtype, errs.CategoryNetwork, errs.SubtypeNetworkTransport)
 	}
 	if !strings.Contains(got.Error(), "download failed: dial tcp timeout") {
 		t.Fatalf("wrapped error = %q", got.Error())
