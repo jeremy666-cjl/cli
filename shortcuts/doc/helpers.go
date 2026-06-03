@@ -46,11 +46,18 @@ func parseDocumentRef(input string) (documentRef, error) {
 	return documentRef{Kind: "docx", Token: raw}, nil
 }
 
-// docEqaInputURL returns the URL to forward to the eqa fetch lane for --doc.
-// eqa is URL-addressed, so a bare docx token is expanded into a brand-standard
-// URL (matching parseDocumentRef's docx default and the native docs_ai lane);
-// a real URL (docx / wiki) is forwarded verbatim. See common.ResourceURLOrBuild.
-func docEqaInputURL(runtime *common.RuntimeContext) string {
+// docEqaResolvedURL returns the URL to forward to the eqa fetch lane for --doc
+// on the Execute path. eqa is URL-addressed; a bare token is resolved via a wiki
+// probe (a wiki node_token → /wiki/<node_token>, else a typed /docx/ URL), and a
+// real URL (docx / wiki) is forwarded verbatim. See common.ResolveFetchURL.
+func docEqaResolvedURL(runtime *common.RuntimeContext) string {
+	return common.ResolveFetchURL(runtime, "docx", strings.TrimSpace(runtime.Str("doc")))
+}
+
+// docEqaTypedURL is the dry-run counterpart: it builds the typed /docx/ URL for a
+// bare token without the wiki probe (dry-run makes no API calls). The real run
+// may rewrite a wiki-node token to /wiki/<node_token>. See ResourceURLOrBuild.
+func docEqaTypedURL(runtime *common.RuntimeContext) string {
 	return common.ResourceURLOrBuild(runtime.Brand(), "docx", strings.TrimSpace(runtime.Str("doc")))
 }
 

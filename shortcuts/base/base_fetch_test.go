@@ -41,11 +41,10 @@ func TestBaseFetchRawInput(t *testing.T) {
 	if got := baseFetchRawInput(rtURL); got != "https://x.feishu.cn/base/appABC?table=tblX" {
 		t.Errorf("url should win verbatim (preserving ?table=), got %q", got)
 	}
-	// Token-only is expanded into a brand-standard bitable URL, since eqa is
-	// URL-addressed (a bare app_token would not parse server-side).
+	// Token-only returns the bare app_token; the run/dry-run paths turn it into a URL.
 	rtTok := common.TestNewRuntimeContext(baseFetchCmd("", "appABC"), nil)
-	if got := baseFetchRawInput(rtTok); got != "https://www.feishu.cn/base/appABC" {
-		t.Errorf("token should expand to a brand-standard base URL, got %q", got)
+	if got := baseFetchRawInput(rtTok); got != "appABC" {
+		t.Errorf("token-only should return the bare app_token, got %q", got)
 	}
 }
 

@@ -33,7 +33,7 @@ func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled b
 		return mixFallback(runtime, "identity", ierr)
 	}
 
-	req := eqafetch.NewRequest(docEqaInputURL(runtime))
+	req := eqafetch.NewRequest(docEqaResolvedURL(runtime))
 	req.WithBlockID = true
 	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
@@ -92,7 +92,7 @@ func emitMix(runtime *common.RuntimeContext, resp *eqafetch.Response, md string)
 
 // dryRunMix describes the faas fetch call for --dry-run --doc-format mix.
 func dryRunMix(runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := eqafetch.NewRequest(docEqaInputURL(runtime))
+	body := eqafetch.NewRequest(docEqaTypedURL(runtime))
 	body.WithBlockID = true
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
