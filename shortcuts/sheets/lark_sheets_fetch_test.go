@@ -41,11 +41,10 @@ func TestSheetFetchRawInput(t *testing.T) {
 	if got := sheetFetchRawInput(rtURL); got != "https://x.feishu.cn/sheets/shtABC?sheet=sub1" {
 		t.Errorf("url should win verbatim (preserving ?sheet=), got %q", got)
 	}
-	// Token-only is expanded into a brand-standard spreadsheet URL, since eqa is
-	// URL-addressed (a bare token would not parse server-side).
+	// Token-only returns the bare token; the run/dry-run paths turn it into a URL.
 	rtTok := common.TestNewRuntimeContext(sheetFetchCmd("", "shtABC"), nil)
-	if got := sheetFetchRawInput(rtTok); got != "https://www.feishu.cn/sheets/shtABC" {
-		t.Errorf("token should expand to a brand-standard sheets URL, got %q", got)
+	if got := sheetFetchRawInput(rtTok); got != "shtABC" {
+		t.Errorf("token-only should return the bare token, got %q", got)
 	}
 }
 

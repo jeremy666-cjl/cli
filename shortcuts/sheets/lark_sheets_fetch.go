@@ -25,7 +25,7 @@ var SheetFetch = common.Shortcut{
 	Command:     "+fetch",
 	Description: "Fetch a spreadsheet as one readable markdown body, tables rendered as GFM (via qa fetch)",
 	Risk:        "read",
-	Scopes:      []string{"sheets:spreadsheet:read"},
+	Scopes:      []string{"sheets:spreadsheet:read", "wiki:node:retrieve"},
 	AuthTypes:   []string{"user", "bot"},
 	HasFormat:   true,
 	Flags: []common.Flag{
@@ -45,16 +45,15 @@ var SheetFetch = common.Shortcut{
 	},
 }
 
-// sheetFetchRawInput returns the URL to forward to eqa. eqa is URL-addressed, so
-// a bare --spreadsheet-token is expanded into a brand-standard spreadsheet URL
-// (the native `sheets +read` lane is token-addressed and needs no such step). A
-// real --url is forwarded verbatim so ?sheet= survives to the server.
+// sheetFetchRawInput returns the raw url-or-token: the --url verbatim (so
+// ?sheet= survives) else the bare --spreadsheet-token. Callers turn it into a
+// fetchable URL — runSheetFetch via common.ResolveFetchURL (wiki-aware probe),
+// dryRunSheetFetch via common.ResourceURLOrBuild (typed, no probe).
 func sheetFetchRawInput(runtime *common.RuntimeContext) string {
-	urlOrToken := strings.TrimSpace(runtime.Str("url"))
-	if urlOrToken == "" {
-		urlOrToken = strings.TrimSpace(runtime.Str("spreadsheet-token"))
+	if url := strings.TrimSpace(runtime.Str("url")); url != "" {
+		return url
 	}
-	return common.ResourceURLOrBuild(runtime.Brand(), "sheet", urlOrToken)
+	return strings.TrimSpace(runtime.Str("spreadsheet-token"))
 }
 
 func validateSheetFetch(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -72,7 +71,7 @@ func validateSheetFetch(ctx context.Context, runtime *common.RuntimeContext) err
 }
 
 func dryRunSheetFetch(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := eqafetch.NewRequest(sheetFetchRawInput(runtime))
+	body := eqafetch.NewRequest(common.ResourceURLOrBuild(runtime.Brand(), "sheet", sheetFetchRawInput(runtime)))
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch spreadsheet as markdown").
@@ -91,7 +90,7 @@ func runSheetFetch(ctx context.Context, runtime *common.RuntimeContext) error {
 		return sheetFetchUnavailable(err)
 	}
 
-	resp, err := eqafetch.Fetch(ctx, client, ident, eqafetch.NewRequest(sheetFetchRawInput(runtime)))
+	resp, err := eqafetch.Fetch(ctx, client, ident, eqafetch.NewRequest(common.ResolveFetchURL(runtime, "sheet", sheetFetchRawInput(runtime))))
 	if err != nil {
 		return sheetFetchUnavailable(err)
 	}

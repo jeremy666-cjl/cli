@@ -25,7 +25,7 @@ var BaseFetch = common.Shortcut{
 	Command:     "+fetch",
 	Description: "Fetch a bitable as one readable markdown body, tables rendered as GFM (via qa fetch)",
 	Risk:        "read",
-	Scopes:      []string{"base:record:read"},
+	Scopes:      []string{"base:record:read", "wiki:node:retrieve"},
 	AuthTypes:   authTypes(),
 	HasFormat:   true,
 	Flags: []common.Flag{
@@ -45,16 +45,15 @@ var BaseFetch = common.Shortcut{
 	},
 }
 
-// baseFetchRawInput returns the URL to forward to eqa. eqa is URL-addressed, so
-// a bare --base-token is expanded into a brand-standard bitable URL (the native
-// `base +record-list` lane is token-addressed and needs no such step). A real
-// --url is forwarded verbatim so ?table= survives to the server.
+// baseFetchRawInput returns the raw url-or-token: the --url verbatim (so ?table=
+// survives) else the bare --base-token. Callers turn it into a fetchable URL —
+// runBaseFetch via common.ResolveFetchURL (wiki-aware probe), dryRunBaseFetch
+// via common.ResourceURLOrBuild (typed, no probe).
 func baseFetchRawInput(runtime *common.RuntimeContext) string {
-	urlOrToken := strings.TrimSpace(runtime.Str("url"))
-	if urlOrToken == "" {
-		urlOrToken = strings.TrimSpace(runtime.Str("base-token"))
+	if url := strings.TrimSpace(runtime.Str("url")); url != "" {
+		return url
 	}
-	return common.ResourceURLOrBuild(runtime.Brand(), "bitable", urlOrToken)
+	return strings.TrimSpace(runtime.Str("base-token"))
 }
 
 func validateBaseFetch(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -73,7 +72,7 @@ func validateBaseFetch(ctx context.Context, runtime *common.RuntimeContext) erro
 }
 
 func dryRunBaseFetch(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
-	body := eqafetch.NewRequest(baseFetchRawInput(runtime))
+	body := eqafetch.NewRequest(common.ResourceURLOrBuild(runtime.Brand(), "bitable", baseFetchRawInput(runtime)))
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch bitable as markdown").
@@ -92,7 +91,7 @@ func runBaseFetch(ctx context.Context, runtime *common.RuntimeContext) error {
 		return baseFetchUnavailable(err)
 	}
 
-	resp, err := eqafetch.Fetch(ctx, client, ident, eqafetch.NewRequest(baseFetchRawInput(runtime)))
+	resp, err := eqafetch.Fetch(ctx, client, ident, eqafetch.NewRequest(common.ResolveFetchURL(runtime, "bitable", baseFetchRawInput(runtime))))
 	if err != nil {
 		return baseFetchUnavailable(err)
 	}
