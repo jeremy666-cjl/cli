@@ -9,7 +9,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/validate"
 	"github.com/larksuite/cli/shortcuts/common"
 )
@@ -30,11 +29,15 @@ var AppsUpdate = common.Shortcut{
 	},
 	Validate: func(ctx context.Context, rctx *common.RuntimeContext) error {
 		if strings.TrimSpace(rctx.Str("app-id")) == "" {
-			return output.ErrValidation("--app-id is required")
+			return appsValidationParamError("--app-id", "--app-id is required")
 		}
 		body := buildAppsUpdateBody(rctx)
 		if len(body) == 0 {
-			return output.ErrValidation("provide at least one of --name or --description")
+			return appsValidationError("provide at least one of --name or --description").
+				WithParams(
+					appsInvalidParam("--name", "provide at least one of --name or --description"),
+					appsInvalidParam("--description", "provide at least one of --name or --description"),
+				)
 		}
 		return nil
 	},
@@ -48,7 +51,7 @@ var AppsUpdate = common.Shortcut{
 	Execute: func(ctx context.Context, rctx *common.RuntimeContext) error {
 		appID := strings.TrimSpace(rctx.Str("app-id"))
 		path := fmt.Sprintf("%s/apps/%s", apiBasePath, validate.EncodePathSegment(appID))
-		data, err := rctx.CallAPI("PATCH", path, nil, buildAppsUpdateBody(rctx))
+		data, err := rctx.CallAPITyped("PATCH", path, nil, buildAppsUpdateBody(rctx))
 		if err != nil {
 			return err
 		}

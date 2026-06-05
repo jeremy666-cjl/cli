@@ -9,7 +9,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
@@ -30,14 +29,14 @@ var AppsCreate = common.Shortcut{
 	},
 	Validate: func(ctx context.Context, rctx *common.RuntimeContext) error {
 		if strings.TrimSpace(rctx.Str("name")) == "" {
-			return output.ErrValidation("--name is required")
+			return appsValidationParamError("--name", "--name is required")
 		}
 		appType := strings.TrimSpace(rctx.Str("app-type"))
 		if appType == "" {
-			return output.ErrValidation("--app-type is required")
+			return appsValidationParamError("--app-type", "--app-type is required")
 		}
 		if !validAppTypes[appType] {
-			return output.ErrValidation(fmt.Sprintf("--app-type %q is not supported (allowed: HTML)", appType))
+			return appsValidationParamError("--app-type", "--app-type %q is not supported (allowed: HTML)", appType)
 		}
 		return nil
 	},
@@ -48,7 +47,7 @@ var AppsCreate = common.Shortcut{
 			Body(buildAppsCreateBody(rctx))
 	},
 	Execute: func(ctx context.Context, rctx *common.RuntimeContext) error {
-		data, err := rctx.CallAPI("POST", apiBasePath+"/apps", nil, buildAppsCreateBody(rctx))
+		data, err := rctx.CallAPITyped("POST", apiBasePath+"/apps", nil, buildAppsCreateBody(rctx))
 		if err != nil {
 			return err
 		}

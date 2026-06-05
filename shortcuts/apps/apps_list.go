@@ -39,7 +39,7 @@ var AppsList = common.Shortcut{
 			Params(buildAppsListParams(rctx))
 	},
 	Execute: func(ctx context.Context, rctx *common.RuntimeContext) error {
-		data, err := rctx.CallAPI("GET", apiBasePath+"/apps", buildAppsListParams(rctx), nil)
+		data, err := rctx.CallAPITyped("GET", apiBasePath+"/apps", buildAppsListParams(rctx), nil)
 		if err != nil {
 			return err
 		}

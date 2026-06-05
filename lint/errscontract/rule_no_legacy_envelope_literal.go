@@ -16,6 +16,7 @@ import (
 // call sites must return a typed errs.* error instead. Future domains opt in by
 // appending their path prefix here.
 var migratedEnvelopePaths = []string{
+	"shortcuts/apps/",
 	"shortcuts/base/",
 	"shortcuts/calendar/",
 	"shortcuts/drive/",
