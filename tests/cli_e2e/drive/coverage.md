@@ -2,8 +2,8 @@
 
 ## Metrics
 - Denominator: 31 leaf commands
-- Covered: 10
-- Coverage: 32.3%
+- Covered: 11
+- Coverage: 35.5%
 
 ## Summary
 - TestDrive_FilesCreateFolderWorkflow: proves `drive files create_folder` in `create_folder as bot`; helper asserts the returned folder token and registers best-effort cleanup via `drive files delete`.
@@ -15,6 +15,7 @@
 - TestDriveAddCommentMarkdownFileWorkflow: opt-in live workflow skeleton for the same path, gated by `LARK_DRIVE_MD_COMMENT_E2E=1`.
 - TestDrive_SecureLabelDryRun: dry-run coverage for `drive +secure-label-list` and `drive +secure-label-update`; asserts label-list query params and update URL→type inference, request method/URL/type query, and `label-id` body shape. Runs without hitting live APIs because update can trigger document-level security approval flows.
 - TestDriveExportDryRun_FileNameMetadata: dry-run coverage for `drive +export`; asserts export task request shape and local `--file-name` / `--output-dir` metadata without calling live APIs.
+- TestDriveImportDryRun_PDFToSlides: dry-run coverage for `drive +import`; asserts PDF-to-slides request shape across media upload `extra` and import task body without calling live APIs.
 - TestDrive_PullDryRun / TestDrive_PullDryRunAcceptsDuplicateRemoteStrategies: dry-run coverage for `drive +pull`; asserts the list-files request shape, Validate-stage safety guards, and acceptance of `--on-duplicate-remote=rename|newest|oldest` by the real CLI binary.
 - TestDrive_PushDryRun / TestDrive_PushDryRunAcceptsDuplicateRemoteStrategies: dry-run coverage for `drive +push`; asserts the list-files request shape, Validate-stage safety guards, conditional delete preflight, and acceptance of `--on-duplicate-remote=newest|oldest` by the real CLI binary.
 - Cleanup note: `drive files delete` is only exercised in cleanup and is intentionally left uncovered.
@@ -31,7 +32,7 @@
 | ✕ | drive +download | shortcut |  | none | no file fixture workflow yet |
 | ✓ | drive +export | shortcut | drive_export_dryrun_test.go::TestDriveExportDryRun_FileNameMetadata | `--token`; `--doc-type`; `--file-extension`; `--file-name`; `--output-dir` | dry-run only; no live export workflow yet |
 | ✕ | drive +export-download | shortcut |  | none | no export-download workflow yet |
-| ✕ | drive +import | shortcut |  | none | no import workflow yet |
+| ✓ | drive +import | shortcut | drive_import_dryrun_test.go::TestDriveImportDryRun_PDFToSlides | `.pdf` source with `--type slides`; media upload `extra.file_extension=pdf`; import task `file_extension=pdf`, `type=slides`, `file_name` | dry-run only; no live import workflow yet |
 | ✕ | drive +move | shortcut |  | none | no move workflow yet |
 | ✓ | drive +pull | shortcut | drive_pull_dryrun_test.go::TestDrive_PullDryRun + drive_duplicate_sync_workflow_test.go::TestDrive_DuplicateRemoteWorkflow | `--local-dir`; `--folder-token`; `--on-duplicate-remote=rename\|newest\|oldest`; `--delete-local --yes` guard | dry-run locks flag/validate shape; live workflow proves duplicate fail-fast and rename recovery |
 | ✓ | drive +push | shortcut | drive_push_dryrun_test.go::TestDrive_PushDryRun + drive_duplicate_sync_workflow_test.go::TestDrive_DuplicateRemoteWorkflow | `--local-dir`; `--folder-token`; `--if-exists`; `--on-duplicate-remote=newest\|oldest`; `--delete-remote --yes` | dry-run locks flag/validate shape; live workflow proves overwrite + duplicate cleanup converges status |

@@ -40,6 +40,10 @@ func TestValidateDriveImportSpec(t *testing.T) {
 			spec: driveImportSpec{FilePath: "./deck.pptx", DocType: "slides"},
 		},
 		{
+			name: "pdf slides ok",
+			spec: driveImportSpec{FilePath: "./deck.pdf", DocType: "slides"},
+		},
+		{
 			name:    "base non bitable rejected",
 			spec:    driveImportSpec{FilePath: "./snapshot.base", DocType: "sheet"},
 			wantErr: ".base files can only be imported as 'bitable'",
@@ -48,6 +52,11 @@ func TestValidateDriveImportSpec(t *testing.T) {
 			name:    "pptx non slides rejected",
 			spec:    driveImportSpec{FilePath: "./deck.pptx", DocType: "docx"},
 			wantErr: ".pptx files can only be imported as 'slides'",
+		},
+		{
+			name:    "pdf non slides rejected",
+			spec:    driveImportSpec{FilePath: "./deck.pdf", DocType: "docx"},
+			wantErr: ".pdf files can only be imported as 'slides'",
 		},
 		{
 			name:    "unknown extension rejected",
@@ -133,6 +142,19 @@ func TestValidateDriveImportFileSize(t *testing.T) {
 		{
 			name:     "pptx within 500mb limit",
 			filePath: "./deck.pptx",
+			docType:  "slides",
+			fileSize: driveImport500MBFileSizeLimit,
+		},
+		{
+			name:     "pdf exceeds 500mb limit",
+			filePath: "./deck.pdf",
+			docType:  "slides",
+			fileSize: driveImport500MBFileSizeLimit + 1,
+			wantText: "exceeds 500.0 MB import limit for .pdf",
+		},
+		{
+			name:     "pdf within 500mb limit",
+			filePath: "./deck.pdf",
 			docType:  "slides",
 			fileSize: driveImport500MBFileSizeLimit,
 		},

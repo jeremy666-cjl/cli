@@ -45,6 +45,7 @@ var driveImportExtToDocTypes = map[string][]string{
 	"csv":      {"sheet", "bitable"},
 	"base":     {"bitable"},
 	"pptx":     {"slides"},
+	"pdf":      {"slides"},
 }
 
 // driveImportSpec contains the user-facing import inputs after normalization.
@@ -153,7 +154,7 @@ func driveImportFileSizeLimit(filePath, docType string) (int64, bool) {
 	switch strings.TrimPrefix(strings.ToLower(filepath.Ext(filePath)), ".") {
 	case "docx", "doc":
 		return driveImport600MBFileSizeLimit, true
-	case "pptx":
+	case "pptx", "pdf":
 		return driveImport500MBFileSizeLimit, true
 	case "txt", "md", "mark", "markdown", "html", "xls", "base":
 		return driveImport20MBFileSizeLimit, true
@@ -199,7 +200,7 @@ func validateDriveImportFileSize(filePath, docType string, fileSize int64) error
 func validateDriveImportSpec(spec driveImportSpec) error {
 	ext := spec.FileExtension()
 	if ext == "" {
-		return errs.NewValidationError(errs.SubtypeInvalidArgument, "file must have an extension (e.g. .md, .docx, .xlsx, .pptx)").WithParam("--file")
+		return errs.NewValidationError(errs.SubtypeInvalidArgument, "file must have an extension (e.g. .md, .docx, .xlsx, .pptx, .pdf)").WithParam("--file")
 	}
 
 	switch spec.DocType {
@@ -210,7 +211,7 @@ func validateDriveImportSpec(spec driveImportSpec) error {
 
 	supportedTypes, ok := driveImportExtToDocTypes[ext]
 	if !ok {
-		return errs.NewValidationError(errs.SubtypeInvalidArgument, "unsupported file extension: %s. Supported extensions are: docx, doc, txt, md, mark, markdown, html, xlsx, xls, csv, base, pptx", ext).WithParam("--file")
+		return errs.NewValidationError(errs.SubtypeInvalidArgument, "unsupported file extension: %s. Supported extensions are: docx, doc, txt, md, mark, markdown, html, xlsx, xls, csv, base, pptx, pdf", ext).WithParam("--file")
 	}
 
 	typeAllowed := false
@@ -231,8 +232,8 @@ func validateDriveImportSpec(spec driveImportSpec) error {
 			hint = fmt.Sprintf(".xls files can only be imported as 'sheet', not '%s'", spec.DocType)
 		case "base":
 			hint = fmt.Sprintf(".base files can only be imported as 'bitable', not '%s'", spec.DocType)
-		case "pptx":
-			hint = fmt.Sprintf(".pptx files can only be imported as 'slides', not '%s'", spec.DocType)
+		case "pptx", "pdf":
+			hint = fmt.Sprintf(".%s files can only be imported as 'slides', not '%s'", ext, spec.DocType)
 		default:
 			hint = fmt.Sprintf(".%s files can only be imported as 'docx', not '%s'", ext, spec.DocType)
 		}
