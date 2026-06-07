@@ -18,6 +18,7 @@ metadata:
 | 大幅改写页面 | 先回读现有 XML，写入新 plan，再替换或重建相关页面 | `xml_presentations.get`、`+replace-slide`、`lark-slides-edit-workflows.md` |
 | 编辑单个标题、文本块、图片或局部元素 | 优先块级替换/插入，不改页序 | `slides +replace-slide`、`lark-slides-replace-slide.md` |
 | 读取或分析已有 PPT | 解析 slides/wiki token，回读全文或单页 XML，保存 `xml_presentation_id`、`slide_id`、`revision_id` | `xml_presentations.get`、`xml_presentation.slide.get` |
+| 总结 / 问答 / 转写已有 PPT（要正文、不要结构） | 一把抓整份 deck 的可读 markdown，直接用于阅读 / 喂模型 | `slides +fetch`、`lark-slides-fetch.md` |
 | 上传或使用图片 | 先上传为 `file_token`，禁止直接写 http(s) 外链 | `slides +media-upload`，或 `+create --slides` 的 `@./path` 占位符 |
 | 用户提到模板、主题、版式 | 先检索模板，再摘要，必要时裁切骨架 | `template_tool.py search → summarize → extract` |
 | 创建失败、空白页、3350001、布局异常 | 先回读状态，再按排障清单修复，不假设原操作原子成功 | `troubleshooting.md`、`validation-checklist.md` |
@@ -261,6 +262,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli slides +<verb> [flags]`�
 | [`+create`](references/lark-slides-create.md) | 创建 PPT（可选 `--slides` 一步添加页面，支持 `<img src="@./local.png">` 占位符自动上传） |
 | [`+media-upload`](references/lark-slides-media-upload.md) | 上传本地图片到指定演示文稿，返回 `file_token`（用作 `<img src="...">`），最大 20 MB |
 | [`+replace-slide`](references/lark-slides-replace-slide.md) | 对已有幻灯片页面进行块级替换/插入（`block_replace` / `block_insert`），自动注入 id 和 `<content/>`，不改变页序 |
+| [`+fetch`](references/lark-slides-fetch.md) | 读取幻灯片正文为可读 markdown（总结 / 问答 / 转写已有 PPT；只读不改、无 block id） |
 
 ```bash
 lark-cli schema slides.<resource>.<method>   # 调用 API 前必须先查看参数结构
@@ -287,6 +289,7 @@ lark-cli slides <resource> <method> [flags] # 调用 API
 | `slides +create` | `slides:presentation:create`, `slides:presentation:write_only`（含 `@` 占位符时还需 `docs:document.media:upload`） |
 | `slides +media-upload` | `docs:document.media:upload`（wiki URL 解析还需 `wiki:node:read`） |
 | `slides +replace-slide` | `slides:presentation:update`（wiki URL 解析还需 `wiki:node:read`） |
+| `slides +fetch` | 读取本人有权限的 deck 正文；仅 wiki URL 解析时需 `wiki:node:read` |
 | `xml_presentations.get` | `slides:presentation:read` |
 | `xml_presentation.slide.create` | `slides:presentation:update` 或 `slides:presentation:write_only` |
 | `xml_presentation.slide.delete` | `slides:presentation:update` 或 `slides:presentation:write_only` |
