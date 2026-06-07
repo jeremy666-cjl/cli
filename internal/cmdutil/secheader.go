@@ -29,6 +29,12 @@ const (
 	HeaderExecutionId = "X-Cli-Execution-Id"
 	HeaderAgentTrace  = "X-Agent-Trace"
 
+	// HeaderXTtEnv routes a request through a non-default gateway environment
+	// lane (e.g. PPE/BOE in the originating service mesh). Public gateways
+	// ignore it, so external users see no behavioral change. Internal testing
+	// escape hatch; gated by envvars.CliXTtEnv.
+	HeaderXTtEnv = "x-tt-env"
+
 	SourceValue = "lark-cli"
 
 	HeaderUserAgent = "User-Agent"
@@ -77,6 +83,9 @@ func BaseSecurityHeaders() http.Header {
 	h.Set(HeaderUserAgent, UserAgentValue())
 	if v := AgentTraceValue(); v != "" {
 		h.Set(HeaderAgentTrace, v)
+	}
+	if v := strings.TrimSpace(os.Getenv(envvars.CliXTtEnv)); v != "" {
+		h.Set(HeaderXTtEnv, v)
 	}
 	return h
 }

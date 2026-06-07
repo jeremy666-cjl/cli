@@ -35,6 +35,8 @@ const (
 	// can never spin forever. 500 pages * 200 paragraphs covers any real
 	// meeting by a wide margin.
 	maxTranscriptPages = 500
+	transcriptPageSize = 200
+	transcriptLocale   = "zh_cn"
 
 	// pageDelay throttles successive page requests to stay gentle on the
 	// downstream, matching the batch cadence used by `vc +notes`.
@@ -79,6 +81,8 @@ var NoteTranscript = common.Shortcut{
 		return common.NewDryRunAPI().
 			GET(fmt.Sprintf("/open-apis/vc/v1/notes/%s/unified_note_transcript", validate.EncodePathSegment(noteID))).
 			Set("format", runtime.Str("format")).
+			Set("page_size", transcriptPageSize).
+			Set("locale", transcriptLocale).
 			Set("note", "CLI paginates internally (cursor_id) and saves the full transcript to a file")
 	},
 	Execute: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -136,7 +140,11 @@ func fetchUnifiedTranscript(ctx context.Context, runtime *common.RuntimeContext,
 			return nil, output.ErrAPI(0, fmt.Sprintf("transcript exceeded %d pages; aborting to avoid an unbounded loop", maxTranscriptPages), nil)
 		}
 
-		query := larkcore.QueryParams{"format": []string{format}}
+		query := larkcore.QueryParams{
+			"format":    []string{format},
+			"locale":    []string{transcriptLocale},
+			"page_size": []string{strconv.Itoa(transcriptPageSize)},
+		}
 		if cursor > 0 {
 			query["cursor_id"] = []string{strconv.FormatInt(cursor, 10)}
 		}

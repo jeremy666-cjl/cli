@@ -24,4 +24,18 @@ const (
 	CliProxyEnable  = "LARKSUITE_CLI_PROXY_ENABLE"
 	CliProxyAddress = "LARKSUITE_CLI_PROXY_ADDRESS"
 	CliCAPath       = "LARKSUITE_CLI_CA_PATH"
+
+	// CliOpenBaseURL overrides the resolved Open API base URL, routing requests
+	// to a non-default gateway (e.g. an internal PPE/BOE domain such as
+	// https://open.feishu-pre.cn). Empty leaves the brand default in place.
+	// Internal testing escape hatch; pair with x-tt-env to select a lane.
+	CliOpenBaseURL = "LARKSUITE_CLI_OPEN_BASE_URL"
+
+	// CliAccountsBaseURL overrides the resolved Accounts base URL used by OAuth
+	// device flow. Internal testing escape hatch for BOE/PPE authorization.
+	CliAccountsBaseURL = "LARKSUITE_CLI_ACCOUNTS_BASE_URL"
+
+	// CliXTtEnv selects the lane value injected into the x-tt-env header.
+	// Unset or empty disables injection. Internal testing escape hatch.
+	CliXTtEnv = "LARK_X_TT_ENV"
 )

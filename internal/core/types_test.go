@@ -3,7 +3,11 @@
 
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/larksuite/cli/internal/envvars"
+)
 
 func TestResolveEndpoints_Feishu(t *testing.T) {
 	ep := ResolveEndpoints(BrandFeishu)
@@ -50,5 +54,21 @@ func TestResolveOpenBaseURL(t *testing.T) {
 	}
 	if got := ResolveOpenBaseURL(BrandLark); got != "https://open.larksuite.com" {
 		t.Errorf("ResolveOpenBaseURL(lark) = %q", got)
+	}
+}
+
+func TestResolveEndpoints_OverridesOpenAndAccounts(t *testing.T) {
+	t.Setenv(envvars.CliOpenBaseURL, "https://open.feishu-boe.cn/")
+	t.Setenv(envvars.CliAccountsBaseURL, "https://accounts.feishu-boe.cn/")
+
+	ep := ResolveEndpoints(BrandFeishu)
+	if ep.Open != "https://open.feishu-boe.cn" {
+		t.Errorf("Open = %q, want BOE open endpoint", ep.Open)
+	}
+	if ep.Accounts != "https://accounts.feishu-boe.cn" {
+		t.Errorf("Accounts = %q, want BOE accounts endpoint", ep.Accounts)
+	}
+	if ep.MCP != "https://mcp.feishu.cn" {
+		t.Errorf("MCP = %q, want default feishu MCP", ep.MCP)
 	}
 }
