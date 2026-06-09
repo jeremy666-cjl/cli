@@ -116,10 +116,6 @@ lark-cli docs +update --api-version v2 --doc "<doc_id>" --command block_replace 
 ### block_delete — 删除指定 block
 
 ```bash
-# 删除单个 block
-lark-cli docs +update --api-version v2 --doc "<doc_id>" --command block_delete \
-  --block-id "目标 block_id"
-
 # 批量删除（逗号分隔）
 lark-cli docs +update --api-version v2 --doc "<doc_id>" --command block_delete \
   --block-id "block_id_1,block_id_2,block_id_3"
