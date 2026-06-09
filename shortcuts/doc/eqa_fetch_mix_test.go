@@ -41,6 +41,37 @@ func TestRenderMix_HeadingsAnchorParagraphsDont(t *testing.T) {
 	}
 }
 
+func TestRenderMix_StripsIllegalXMLControlChars(t *testing.T) {
+	t.Parallel()
+	// PDF-derived ContentWithBlockID carries stray C0 controls (U+000C form
+	// feed, U+0008 backspace — LaTeX \f / \b mangled by extraction). The strict
+	// XML decoder rejects them; renderMix must strip them, not crash and fall
+	// back. \f sits mid-word inside a heading, \b inside a paragraph.
+	xml := "<h1 id=\"blk\">A\x0cB</h1><p>x\x08y</p>"
+	got := mustRenderMix(t, xml, nil, eqafetch.ModeOne, 0) // mustRenderMix fails on error
+
+	if !strings.Contains(got, "# AB {#blk}") {
+		t.Errorf("heading should render with control char stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, "xy") {
+		t.Errorf("paragraph should render with control char stripped, got:\n%s", got)
+	}
+	if strings.ContainsAny(got, "\x0c\x08") {
+		t.Errorf("output still carries a control char:\n%q", got)
+	}
+}
+
+func TestStripInvalidXMLChars_FastPathReturnsCleanInputUnchanged(t *testing.T) {
+	t.Parallel()
+	clean := "<h1 id=\"x\">tab\there\nand newline</h1>" // \t and \n are legal
+	if got := stripInvalidXMLChars(clean); got != clean {
+		t.Errorf("clean input must be returned unchanged, got:\n%q", got)
+	}
+	if got := stripInvalidXMLChars("a\x0c\x08b"); got != "ab" {
+		t.Errorf("control chars must be stripped, got: %q", got)
+	}
+}
+
 func TestRenderMix_HeadingWithoutIDStaysPlain(t *testing.T) {
 	t.Parallel()
 	got := mustRenderMix(t, `<h3>无 id 标题</h3>`, nil, eqafetch.ModeOne, 0)

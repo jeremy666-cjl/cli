@@ -117,7 +117,10 @@ func renderMix(xmlContent string, metas map[string]*eqafetch.ImageMeta, mode eqa
 	// Wrap in a synthetic root so the fragment is a single well-formed document.
 	// Strict=false + the HTML auto-close / entity tables let the strict XML
 	// decoder tolerate the embedded HTML table (void tags, &nbsp;, missing ends).
-	dec := xml.NewDecoder(strings.NewReader("<mixroot>" + xmlContent + "</mixroot>"))
+	// Strip XML-illegal control chars first: PDF-derived ContentWithBlockID can
+	// carry stray U+000C/U+0008 (LaTeX \f/\b mangled by extraction) which the
+	// decoder rejects even with Strict=false, aborting the whole render.
+	dec := xml.NewDecoder(strings.NewReader("<mixroot>" + stripInvalidXMLChars(xmlContent) + "</mixroot>"))
 	dec.Strict = false
 	dec.AutoClose = xml.HTMLAutoClose
 	dec.Entity = xml.HTMLEntity
@@ -396,6 +399,33 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// isInvalidXMLChar reports whether r is illegal in XML 1.0 character data
+// (the C0 controls except \t \n \r, plus the U+FFFE/U+FFFF noncharacters).
+func isInvalidXMLChar(r rune) bool {
+	if r == '\t' || r == '\n' || r == '\r' {
+		return false
+	}
+	return r < 0x20 || r == 0xFFFE || r == 0xFFFF
+}
+
+// stripInvalidXMLChars removes XML-1.0-illegal characters so the strict decoder
+// doesn't abort the whole render on a single bad byte. PDF-derived
+// ContentWithBlockID can carry stray U+000C / U+0008 (LaTeX \f / \b mangled by
+// text extraction), which encoding/xml rejects even with Strict=false. Fast
+// path: the input is returned untouched when clean (the common case), so normal
+// docx content pays no allocation.
+func stripInvalidXMLChars(s string) string {
+	if strings.IndexFunc(s, isInvalidXMLChar) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isInvalidXMLChar(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // normalizeInline trims and folds newlines to spaces — heading/paragraph/cell
