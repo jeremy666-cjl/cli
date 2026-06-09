@@ -28,12 +28,7 @@ var SheetFetch = common.Shortcut{
 	Scopes:      []string{"sheets:spreadsheet:read", "wiki:node:retrieve"},
 	AuthTypes:   []string{"user", "bot"},
 	HasFormat:   true,
-	Flags: []common.Flag{
-		{Name: "url", Desc: "spreadsheet URL (preserves ?sheet= for the active sub-table)"},
-		{Name: "spreadsheet-token", Desc: "spreadsheet token (alternative to --url)"},
-		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "cap each rendered table to N data rows (0 = no limit)"},
-		{Name: "image-urls", Default: "one", Enum: []string{"none", "one", "full"}, Desc: "image rendering: none (caption only) | one (single URL + WxH) | full (all routes)"},
-	},
+	Flags:       flagsFor("+fetch"),
 	Tips: []string{
 		"Reads the entire spreadsheet as markdown; for a specific range as a raw 2D array use `sheets +read`.",
 		"Pass the full URL (with ?sheet=...) to read a specific sub-table; eqa resolves it server-side.",
