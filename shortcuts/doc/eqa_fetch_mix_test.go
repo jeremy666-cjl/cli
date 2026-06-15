@@ -163,6 +163,42 @@ func TestRenderMix_NativeSheetToGFM(t *testing.T) {
 	}
 }
 
+// TestRenderMix_SheetNestedInListNotDropped guards the renderList fix: qa nests
+// a native <sheet> table directly inside an <ol> (between <li> items). The list
+// renderer must dispatch that non-<li> block instead of walking through and
+// dropping its tokens — otherwise the whole table (GFM + anchor) vanishes with
+// no marker.
+func TestRenderMix_SheetNestedInListNotDropped(t *testing.T) {
+	t.Parallel()
+	xml := `<ol>` +
+		`<li id="li1">第一步</li>` +
+		`<sheet id="blk_sheet"><table>` +
+		`<thead><tr><th>边</th><th>方式</th></tr></thead>` +
+		`<tbody><tr><td>文档-文档</td><td>引用</td></tr></tbody>` +
+		`</table></sheet>` +
+		`<li id="li2">第二步</li>` +
+		`</ol>`
+	got := mustRenderMix(t, xml, nil, eqafetch.ModeOne, 0)
+
+	// Both list items survive around the table.
+	if !strings.Contains(got, "1. 第一步") || !strings.Contains(got, "第二步") {
+		t.Errorf("list items wrong:\n%s", got)
+	}
+	// The nested table is rendered as GFM with its anchor, not dropped.
+	if !strings.Contains(got, "**表** {#blk_sheet}") {
+		t.Errorf("nested sheet anchor missing (table dropped?):\n%s", got)
+	}
+	for _, want := range []string{
+		"| 边 | 方式 |",
+		"| --- | --- |",
+		"| 文档-文档 | 引用 |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing GFM row %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderMix_SheetTruncation(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder

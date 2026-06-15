@@ -229,6 +229,17 @@ func (r *mixRenderer) renderList(dec *xml.Decoder, start xml.StartElement) error
 					}
 					r.out.WriteString(marker + txt + "\n")
 				}
+			} else {
+				// A non-<li> block interleaved between list items — qa nests a
+				// <sheet>/<bitable> table (or image/board) directly inside the
+				// <ol>/<ul>. Render it as its own block instead of letting the
+				// loop walk through (and silently drop) its tokens. A leading
+				// blank line breaks it off the preceding item so a GFM table
+				// isn't glued onto a list line.
+				r.out.WriteString("\n")
+				if err := r.renderBlock(dec, t); err != nil {
+					return err
+				}
 			}
 		case xml.EndElement:
 			if t.Name.Local == start.Name.Local {
