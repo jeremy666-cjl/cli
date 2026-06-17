@@ -14,7 +14,7 @@ metadata:
 
 ## 快速决策
 - 已知 spreadsheet URL / token 后，再进入 `sheets +info`、`sheets +read`、`sheets +find` 等对象内部操作。
-- 快速浏览 / 理解整张表内容时，可以考虑 [`sheets +fetch`](references/lark-sheets-fetch.md)：它会返回**整张表为一串可读 markdown 正文**（结构为文档名 + 各子表名 + 子表内容展开成的 GFM 表格），URL 带 `?sheet=` 时自动读对应子表；但它默认可能只渲染部分行。若要读**某区间的裸二维数组**，或问题涉及精确计数 / 筛选 / 去重 / 分组，先用 `+info` 确认范围，再用 `sheets +read` 读取结构化数据。
+- 要**把整张表（尤其多子表）读成内容 / 总结 / 翻译 / 问答 / 喂模型**用 [`sheets +fetch`](references/lark-sheets-fetch.md)：一次返回全工作簿的可读 markdown（服务端渲染人名 / 日期 / GFM 表；默认每子表 50 行，`--embed-max-rows` 调大 / 设 0）。要**精确计数 / 筛选 / 去重 / 分组、取裸值或某区间**仍走 `+info` → `+read`。
 
 ## 核心概念
 
