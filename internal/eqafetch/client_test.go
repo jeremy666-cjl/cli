@@ -5,6 +5,7 @@ package eqafetch
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,66 @@ func TestNewRequestOmitsBlockID(t *testing.T) {
 	req := NewRequest("https://doc")
 	if req.WithBlockID {
 		t.Fatalf("NewRequest should default WithBlockID=false")
+	}
+}
+
+// TestFetchPaginationRoundTrip asserts the doc-lane contract: the pagination
+// trio marshals into the request body, and HasMore / NextPageToken decode from
+// the response.
+func TestFetchPaginationRoundTrip(t *testing.T) {
+	const canned = `{"Title":"Doc","FullContent":"# page 1",` +
+		`"HasMore":true,"NextPageToken":"tok-2",` +
+		`"BaseResp":{"StatusCode":0}}`
+
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(canned))
+	}))
+	defer srv.Close()
+	t.Setenv("LARK_CLI_QA_FAAS_URL", srv.URL)
+
+	client, err := faasbridge.NewClient()
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	req := NewRequest("https://doc")
+	req.EnablePagination = true
+	req.PageToken = "tok-1"
+	req.PageSize = 4000
+	resp, err := Fetch(context.Background(), client, faasbridge.Identity{}, req)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	for _, want := range []string{`"EnablePagination":true`, `"PageToken":"tok-1"`, `"PageSize":4000`} {
+		if !strings.Contains(gotBody, want) {
+			t.Errorf("request body missing %s: %s", want, gotBody)
+		}
+	}
+	if !resp.HasMore || resp.NextPageToken != "tok-2" {
+		t.Errorf("pagination decode mismatch: HasMore=%v NextPageToken=%q", resp.HasMore, resp.NextPageToken)
+	}
+}
+
+// TestNewRequestOmitsPagination guards the sheet/base/slides lanes: NewRequest
+// leaves the pagination trio unset and omitempty drops it from the wire, so
+// those out-of-scope lanes keep their exact prior request shape.
+func TestNewRequestOmitsPagination(t *testing.T) {
+	t.Parallel()
+	req := NewRequest("https://doc")
+	if req.EnablePagination || req.PageToken != "" || req.PageSize != 0 {
+		t.Fatalf("NewRequest should leave pagination unset, got %+v", req)
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, bad := range []string{"EnablePagination", "PageToken", "PageSize"} {
+		if strings.Contains(string(raw), bad) {
+			t.Errorf("wire shape leaked %s: %s", bad, raw)
+		}
 	}
 }
 

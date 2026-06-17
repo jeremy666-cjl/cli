@@ -24,44 +24,57 @@ import (
 // for write-back. On any failure it returns handled=false and the caller falls
 // through to the native docs_ai path (remapped to markdown) — "只增不减".
 func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled bool, err error) {
+	continuation := isPageContinuation(runtime)
 	client, cerr := faasbridge.NewClient()
 	if cerr != nil {
-		return mixFallback(runtime, "faas-config", cerr)
+		return mixFail(runtime, continuation, "faas-config", cerr)
 	}
 	ident, ierr := faasbridge.ResolveCurrentIdentity(ctx, runtime)
 	if ierr != nil {
-		return mixFallback(runtime, "identity", ierr)
+		return mixFail(runtime, continuation, "identity", ierr)
 	}
 
 	req := eqafetch.NewRequest(docEqaResolvedURL(runtime))
 	req.WithBlockID = true
+	applyDocPagination(runtime, &req)
 	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
-		return mixFallback(runtime, "eqa-call", ferr)
+		return mixFail(runtime, continuation, "eqa-call", ferr)
 	}
 	if resp == nil {
-		return mixFallback(runtime, "eqa-empty", fmt.Errorf("nil response"))
+		return mixFail(runtime, continuation, "eqa-empty", fmt.Errorf("nil response"))
 	}
 	if resp.BaseResp != nil && resp.BaseResp.StatusCode != 0 {
-		return mixFallback(runtime, "eqa-status",
+		return mixFail(runtime, continuation, "eqa-status",
 			fmt.Errorf("status %d: %s", resp.BaseResp.StatusCode, resp.BaseResp.StatusMessage))
 	}
 	if strings.TrimSpace(resp.ContentWithBlockID) == "" {
 		// No block-id XML (e.g. eqa not yet wired, or a minutes/unsupported entity).
-		return mixFallback(runtime, "eqa-no-blockid", fmt.Errorf("empty ContentWithBlockID"))
+		return mixFail(runtime, continuation, "eqa-no-blockid", fmt.Errorf("empty ContentWithBlockID"))
 	}
 
 	md, rerr := renderMix(resp.ContentWithBlockID, resp.QAImageMetaMap,
 		eqafetch.ParseImageMode(runtime.Str("image-urls")), runtime.Int("embed-max-rows"))
 	if rerr != nil {
-		return mixFallback(runtime, "mix-render", rerr)
+		return mixFail(runtime, continuation, "mix-render", rerr)
 	}
 	if strings.TrimSpace(md) == "" {
-		return mixFallback(runtime, "mix-empty", fmt.Errorf("rendered empty content"))
+		return mixFail(runtime, continuation, "mix-empty", fmt.Errorf("rendered empty content"))
 	}
 
 	emitMix(runtime, resp, md)
 	return true, nil
+}
+
+// mixFail routes a qa-side failure: a first-page read falls back to native
+// markdown (handled=false → caller continues), but a --page-token continuation
+// must not fall back (native docs_ai can't honor a cursor), so it returns a
+// typed error (handled=true → caller stops).
+func mixFail(runtime *common.RuntimeContext, continuation bool, stage string, cause error) (bool, error) {
+	if continuation {
+		return true, pageContinuationFailed(stage, cause)
+	}
+	return mixFallback(runtime, stage, cause)
 }
 
 // mixFallback emits one stderr notice and returns (false, nil) so the caller
@@ -85,15 +98,18 @@ func emitMix(runtime *common.RuntimeContext, resp *eqafetch.Response, md string)
 		},
 		"source": "eqa_mix_format",
 	}
+	pageEnvelope(data, resp)
 	runtime.OutFormatRaw(data, nil, func(w io.Writer) {
 		fmt.Fprintln(w, md)
 	})
+	emitPageHint(runtime, resp)
 }
 
 // dryRunMix describes the faas fetch call for --dry-run --doc-format mix.
 func dryRunMix(runtime *common.RuntimeContext) *common.DryRunAPI {
 	body := eqafetch.NewRequest(docEqaTypedURL(runtime))
 	body.WithBlockID = true
+	applyDocPagination(runtime, &body)
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch document (mix: materialized markdown + block-id anchors)").

@@ -23,25 +23,27 @@ import (
 // worst case equals today's native markdown).
 func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (handled bool, err error) {
 	// Fail fast & cheap on missing gateway config before any network round-trip.
+	continuation := isPageContinuation(runtime)
 	client, cerr := faasbridge.NewClient()
 	if cerr != nil {
-		return inlineFallback(runtime, "faas-config", cerr)
+		return inlineFail(runtime, continuation, "faas-config", cerr)
 	}
 	ident, ierr := faasbridge.ResolveCurrentIdentity(ctx, runtime)
 	if ierr != nil {
-		return inlineFallback(runtime, "identity", ierr)
+		return inlineFail(runtime, continuation, "identity", ierr)
 	}
 
 	req := eqafetch.NewRequest(docEqaResolvedURL(runtime))
+	applyDocPagination(runtime, &req)
 	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
 	if ferr != nil {
-		return inlineFallback(runtime, "eqa-call", ferr)
+		return inlineFail(runtime, continuation, "eqa-call", ferr)
 	}
 	if resp == nil || strings.TrimSpace(resp.FullContent) == "" {
-		return inlineFallback(runtime, "eqa-empty", fmt.Errorf("empty FullContent"))
+		return inlineFail(runtime, continuation, "eqa-empty", fmt.Errorf("empty FullContent"))
 	}
 	if resp.BaseResp != nil && resp.BaseResp.StatusCode != 0 {
-		return inlineFallback(runtime, "eqa-status",
+		return inlineFail(runtime, continuation, "eqa-status",
 			fmt.Errorf("status %d: %s", resp.BaseResp.StatusCode, resp.BaseResp.StatusMessage))
 	}
 
@@ -50,6 +52,15 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 
 	emitInlineEmbeds(runtime, resp, md)
 	return true, nil
+}
+
+// inlineFail routes a qa-side failure the same way as mixFail: first-page reads
+// fall back to native markdown, --page-token continuations return a typed error.
+func inlineFail(runtime *common.RuntimeContext, continuation bool, stage string, cause error) (bool, error) {
+	if continuation {
+		return true, pageContinuationFailed(stage, cause)
+	}
+	return inlineFallback(runtime, stage, cause)
 }
 
 // inlineFallback emits one stderr notice and returns (false, nil) so the caller
@@ -74,14 +85,17 @@ func emitInlineEmbeds(runtime *common.RuntimeContext, resp *eqafetch.Response, m
 		},
 		"source": "eqa_inline_embeds",
 	}
+	pageEnvelope(data, resp)
 	runtime.OutFormatRaw(data, nil, func(w io.Writer) {
 		fmt.Fprintln(w, md)
 	})
+	emitPageHint(runtime, resp)
 }
 
 // dryRunInlineEmbeds describes the faas fetch call for --dry-run.
 func dryRunInlineEmbeds(runtime *common.RuntimeContext) *common.DryRunAPI {
 	body := eqafetch.NewRequest(docEqaTypedURL(runtime))
+	applyDocPagination(runtime, &body)
 	return common.NewDryRunAPI().
 		POST(faasbridge.BaseURL()+eqafetch.Path).
 		Desc("qa faas: fetch document (materialized markdown)").

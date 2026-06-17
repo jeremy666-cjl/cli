@@ -29,6 +29,9 @@ func v2FetchFlags() []common.Flag {
 		{Name: "inline-embeds", Type: "bool", Default: "false", Desc: "markdown only: expand embedded bitable/sheet to GFM via the qa fetch service (falls back to native markdown on any failure)"},
 		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "inline-embeds: cap each materialized table to N data rows (0 = no limit)"},
 		{Name: "image-urls", Default: "one", Enum: []string{"none", "one", "full"}, Desc: "inline-embeds: image rendering — none (caption only) | one (single URL + WxH) | full (all routes)"},
+		{Name: "full", Type: "bool", Default: "false", Desc: "markdown only: return the whole document in one response (disable the default auto-pagination of large docs)"},
+		{Name: "page-token", Desc: "markdown only: continue a paginated read from a prior response's next_page_token"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "markdown only: per-page token budget hint for large docs (0 = server default; clamped server-side)"},
 	}
 }
 
@@ -50,6 +53,36 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	}
 	if err := validateMarkdownFormat(runtime); err != nil {
 		return err
+	}
+	if err := validatePagination(runtime); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validatePagination gates the pagination flags (--full / --page-token /
+// --page-size). They only apply to the whole-doc markdown lane (which routes
+// through the qa fetch service); the native docs_ai xml lane and --scope partial
+// reads have no page cursor. --full is mutually exclusive with --page-token /
+// --page-size (forcing the whole doc contradicts asking for a single page).
+func validatePagination(runtime *common.RuntimeContext) error {
+	full := runtime.Bool("full")
+	token := strings.TrimSpace(runtime.Str("page-token"))
+	size := runtime.Int("page-size")
+	if !full && token == "" && size == 0 {
+		return nil
+	}
+	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
+		return common.FlagErrorf("--full/--page-token/--page-size require --doc-format markdown (got %q)", format)
+	}
+	if !isWholeDocRead(runtime) {
+		return common.FlagErrorf("--full/--page-token/--page-size cannot be combined with a --scope partial read")
+	}
+	if size < 0 {
+		return common.FlagErrorf("--page-size must be >= 0, got %d", size)
+	}
+	if full && (token != "" || size > 0) {
+		return common.FlagErrorf("--full cannot be combined with --page-token/--page-size")
 	}
 	return nil
 }

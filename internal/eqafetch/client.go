@@ -26,10 +26,20 @@ const Path = "/knowledge_qa/fetch"
 // path (⑤b) to ask eqa/qa for ContentWithBlockID (XML with real block ids);
 // --inline-embeds / sheet+base fetch (②a) leave it false so omitempty drops it
 // from the wire.
+//
+// The pagination trio (EnablePagination / PageToken / PageSize) is set only by
+// the doc markdown lane (mix + inline-embeds), so a large doc comes back as
+// page 1 + a NextPageToken the model can follow instead of one oversized
+// payload. All three are omitempty, so the lanes that never set them (sheet /
+// base / slides) keep their exact prior wire shape — qa paginates only the doc
+// path anyway. PageSize is a hint; qa clamps it to its server-side band.
 type Request struct {
-	URL         string       `json:"URL"`
-	ImageConfig *ImageConfig `json:"ImageConfig,omitempty"`
-	WithBlockID bool         `json:"WithBlockID,omitempty"`
+	URL              string       `json:"URL"`
+	ImageConfig      *ImageConfig `json:"ImageConfig,omitempty"`
+	WithBlockID      bool         `json:"WithBlockID,omitempty"`
+	EnablePagination bool         `json:"EnablePagination,omitempty"`
+	PageToken        string       `json:"PageToken,omitempty"`
+	PageSize         int32        `json:"PageSize,omitempty"`
 }
 
 type ImageConfig struct {
@@ -57,6 +67,11 @@ func NewRequest(rawURL string) Request {
 // reads. Unlisted fields are ignored by json.Unmarshal. ContentWithBlockID is
 // qa's XMLDocTreeRender output (XML carrying real block ids); eqa populates it
 // only when the request set WithBlockID, so it is empty for the ②a path.
+//
+// HasMore / NextPageToken carry qa's body pagination cursor: when the doc spans
+// more than one page, FullContent / ContentWithBlockID / QAImageMetaMap are this
+// page only, HasMore is true and NextPageToken addresses the next page. A
+// single-page (small) doc leaves HasMore false and NextPageToken empty.
 type Response struct {
 	Title              string                `json:"Title"`
 	FullContent        string                `json:"FullContent"`
@@ -64,6 +79,8 @@ type Response struct {
 	UpdateTime         int64                 `json:"UpdateTime"`
 	QAImageMetaMap     map[string]*ImageMeta `json:"QAImageMetaMap"`
 	ContentWithBlockID string                `json:"ContentWithBlockID"`
+	NextPageToken      string                `json:"NextPageToken"`
+	HasMore            bool                  `json:"HasMore"`
 	BaseResp           *BaseResp             `json:"BaseResp"`
 }
 

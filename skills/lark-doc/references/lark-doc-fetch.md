@@ -43,7 +43,7 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 
 ## 选 `--doc-format`（输出格式）
 
-> **分工**：读用 `markdown`（可读 + 块级锚点，R+W 友好）；要逐块/逐段精确编辑、或要完整结构与样式属性用 `xml`。
+> **分工**：读用 `markdown`（可读 + 块级锚点）；要逐块/逐段精确编辑、或要完整结构与样式属性用 `xml`。
 
 ## 选 `--scope`（读取范围）
 
@@ -101,7 +101,7 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 
 `content` 的格式由 `--doc-format` 决定。设置 `--scope` 时会被 `<fragment>` 包裹，详见上文"局部读取的输出结构"。
 
-> **`--doc-format markdown`（doc/wiki）**：会渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。内嵌多维表格默认为 id 化占位（要全量展开用 `--inline-embeds`，但展开后无块级 id）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 适用。任何失败自动回退原生 markdown（只增不减）。`source: eqa_mix_format`（回退时为原生 markdown）标记该路径。**此渲染仅整篇读取走**；带 `--scope` 的局部读返回原生 `<fragment>` 命中切片（无 mix 锚点、无 `source` 字段），keyword/outline/range/section 均生效，需要可寻址块 id 用 `--doc-format xml --detail with-ids`。
+> **`--doc-format markdown`（doc/wiki）**：会渲染成 md 主体 + 浅锚点——标题 `## 标题 {#blockid}`、原生表展成 GFM 并挂 `**表** {#blockid}`、图片 `![cap (WxH)](url){#blockid}`，**只给 heading/表/图/画板挂锚点，段落不挂**。内嵌多维表格默认为 id 化占位（要全量展开用 `--inline-embeds`，但展开后无块级 id）；图片裁剪 `--image-urls none|one|full`、表格截断 `--embed-max-rows N` 适用。任何失败自动回退原生 markdown。`source: eqa_mix_format`（回退时为原生 markdown）标记该路径。**此渲染仅整篇读取走**；带 `--scope` 的局部读返回原生 `<fragment>` 命中切片（无 mix 锚点、无 `source` 字段），keyword/outline/range/section 均生效，需要可寻址块 id 用 `--doc-format xml --detail with-ids`。超大文档默认只返回第 1 页正文 + `next_page_token`，`--page-token` 续读、`--full` 取整篇。
 
 ## 参数
 
@@ -119,6 +119,9 @@ lark-cli docs +fetch --api-version v2 --doc Z1Fj...tnAc \
 | `--context-before` | 否 | 命中前拉几个兄弟块（仅对顶层单元生效，默认 `0`）                                                                              |
 | `--context-after` | 否 | 命中后拉几个兄弟块（仅对顶层单元生效，默认 `0`）                                                                              |
 | `--max-depth` | 否 | `outline` = 标题层级上限；其它 = 子树深度（`-1` 不限，默认）                                                                |
+| `--full` | 否 | 仅 `markdown`：一次返回整篇，关闭大文档自动分页                                                                            |
+| `--page-token` | 否 | 仅 `markdown`：用上一页的 `next_page_token` 续读下一页                                                              |
+| `--page-size` | 否 | 仅 `markdown`：单页 token 预算提示（`0` = 服务端默认）                                                                  |
 | `--format` | 否 | `json`（默认）\| `pretty`                                                                                   |
 
 ## 图片、文件、画板的处理
