@@ -18,6 +18,7 @@ metadata:
 | 大幅改写页面 | 先回读现有 XML，写入新 plan，再替换或重建相关页面 | `xml_presentations.get`、`+replace-slide`、`lark-slides-edit-workflows.md` |
 | 编辑单个标题、文本块、图片或局部元素 | 优先块级替换/插入，不改页序 | `slides +replace-slide`、`lark-slides-replace-slide.md` |
 | 读取或分析已有 PPT | 解析 slides/wiki token，回读全文或单页 XML，保存 `xml_presentation_id`、`slide_id`、`revision_id` | `xml_presentations.get`、`xml_presentation.slide.get` |
+| 总结 / 问答 / 转写已有 PPT（要正文、不要结构） | 一把抓整份 deck 的可读 markdown，直接用于阅读 / 喂模型 | `slides +fetch`、`lark-slides-fetch.md` |
 | 上传或使用图片 | 先上传为 `file_token`，禁止直接写 http(s) 外链 | `slides +media-upload`，或 `+create --slides` 的 `@./path` 占位符 |
 | 在 slide 中绘制柱/条/折线/面积/雷达/饼等有数据序列的图表 | 使用原生 `<chart>` 元素 | `xml-schema-quick-ref.md` |
 | 在 slide 中绘制流程图、时序图、架构图、散点图、漏斗图或装饰图案 | 必须先用 Read 工具读取参考文档，再生成 `<whiteboard>` 元素 | [`lark-slides-whiteboard.md`](references/lark-slides-whiteboard.md) |
@@ -266,6 +267,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli slides +<verb> [flags]`�
 | [`+create`](references/lark-slides-create.md) | 创建 PPT（可选 `--slides` 一步添加页面，支持 `<img src="@./local.png">` 占位符自动上传） |
 | [`+media-upload`](references/lark-slides-media-upload.md) | 上传本地图片到指定演示文稿，返回 `file_token`（用作 `<img src="...">`），最大 20 MB |
 | [`+replace-slide`](references/lark-slides-replace-slide.md) | 对已有幻灯片页面进行块级替换/插入（`block_replace` / `block_insert`），自动注入 id 和 `<content/>`，不改变页序 |
+| [`+fetch`](references/lark-slides-fetch.md) | 读取幻灯片正文为可读 markdown（总结 / 问答 / 转写已有 PPT；只读不改、无 block id） |
 
 没有 Shortcut 覆盖时使用原生 API。高频资源：`xml_presentations.get` 读取全文；`xml_presentation.slide.create/delete/get/replace` 管理单页。
 

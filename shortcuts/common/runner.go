@@ -87,6 +87,15 @@ func (ctx *RuntimeContext) Command() string {
 // UserOpenId returns the current user's open_id from config.
 func (ctx *RuntimeContext) UserOpenId() string { return ctx.Config.UserOpenId }
 
+// Brand returns the configured Lark brand, defaulting to BrandFeishu when no
+// config is loaded (e.g. in tests). Used to build brand-standard resource URLs.
+func (ctx *RuntimeContext) Brand() core.LarkBrand {
+	if ctx == nil || ctx.Config == nil {
+		return core.BrandFeishu
+	}
+	return ctx.Config.Brand
+}
+
 // Lang returns the user's preference as a canonical locale, or "" if unset or
 // unrecognized; callers choose their own fallback.
 func (ctx *RuntimeContext) Lang() i18n.Lang {
@@ -835,14 +844,40 @@ func (s Shortcut) mountDeclarative(ctx context.Context, parent *cobra.Command, f
 	}
 	botOnly := len(shortcut.AuthTypes) == 1 && shortcut.AuthTypes[0] == "bot"
 
+	// A shortcut with an empty Command is the service's *default action*: the
+	// service node itself (e.g. `lark-cli search`) is made runnable in place
+	// rather than mounting a `<service> +verb` child. Use this when a service
+	// has a single primary verb whose name would only repeat the service.
+	if shortcut.Command == "" {
+		configureShortcutCommand(ctx, parent, f, &shortcut, botOnly)
+		if shortcut.PostMount != nil {
+			shortcut.PostMount(parent)
+		}
+		return
+	}
+
 	cmd := &cobra.Command{
 		Use:    shortcut.Command,
-		Short:  shortcut.Description,
 		Hidden: shortcut.Hidden,
-		Args:   rejectPositionalArgs(),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runShortcut(cmd, f, &shortcut, botOnly)
-		},
+	}
+	configureShortcutCommand(ctx, cmd, f, &shortcut, botOnly)
+	parent.AddCommand(cmd)
+	if shortcut.PostMount != nil {
+		shortcut.PostMount(cmd)
+	}
+}
+
+// configureShortcutCommand wires a shortcut's behavior onto an existing
+// *cobra.Command — short help, positional-arg rejection, RunE, identities,
+// flags, tips, and risk. Shared by the `<service> +verb` child path and the
+// service-node default-action path (empty Command), so both go through the
+// identical runShortcut pipeline. `shortcut` must point at the caller's local
+// copy so the RunE closure captures the normalized AuthTypes.
+func configureShortcutCommand(ctx context.Context, cmd *cobra.Command, f *cmdutil.Factory, shortcut *Shortcut, botOnly bool) {
+	cmd.Short = shortcut.Description
+	cmd.Args = rejectPositionalArgs()
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		return runShortcut(cmd, f, shortcut, botOnly)
 	}
 	if shortcut.PrintFlagSchema != nil || shortcut.OnInvoke != nil {
 		onInvoke := shortcut.OnInvoke
@@ -869,13 +904,9 @@ func (s Shortcut) mountDeclarative(ctx context.Context, parent *cobra.Command, f
 	}
 	cmdmeta.SetSource(cmd, cmdmeta.SourceShortcut, false)
 	cmdutil.SetSupportedIdentities(cmd, shortcut.AuthTypes)
-	registerShortcutFlagsWithContext(ctx, cmd, f, &shortcut)
+	registerShortcutFlagsWithContext(ctx, cmd, f, shortcut)
 	cmdutil.SetTips(cmd, shortcut.Tips)
 	cmdutil.SetRisk(cmd, shortcut.Risk)
-	parent.AddCommand(cmd)
-	if shortcut.PostMount != nil {
-		shortcut.PostMount(cmd)
-	}
 }
 
 // runShortcut is the execution pipeline for a declarative shortcut.

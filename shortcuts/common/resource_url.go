@@ -57,6 +57,84 @@ func BuildResourceURL(brand core.LarkBrand, kind, token string) string {
 	}
 }
 
+// ResourceURLOrBuild normalizes a "URL or bare token" input into a URL suitable
+// for a URL-addressed backend (the qa fetch lane / eqa FetchKnowledgeQa, which
+// only accepts a URL, not a bare token). When input already looks like a URL
+// (contains "://") it is returned unchanged so query params (?sheet=/?table=)
+// and wiki paths survive; otherwise it is treated as a bare token of the given
+// kind and expanded via BuildResourceURL. An unknown kind (BuildResourceURL
+// returns "") falls back to the original input so the backend surfaces a clear
+// error rather than the cli silently guessing. The native token-addressed
+// OpenAPI lanes use the token directly and do not need this.
+func ResourceURLOrBuild(brand core.LarkBrand, kind, input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.Contains(input, "://") {
+		return input
+	}
+	if built := BuildResourceURL(brand, kind, input); built != "" {
+		return built
+	}
+	return input
+}
+
+// ResolveFetchURL turns a "URL or bare token" into a URL the eqa fetch lane
+// (URL-addressed) can read, disambiguating a bare token's true nature via a wiki
+// probe. A real URL (contains "://") or empty input is returned unchanged. A
+// bare token is probed against wiki get_node: if it resolves to a wiki node it
+// becomes /wiki/<node_token> (origin_node_token for shortcuts) so eqa resolves
+// the node → underlying doc; otherwise it falls back to a typed URL from
+// declaredKind via ResourceURLOrBuild. Any probe failure (missing scope, not a
+// node, transport) degrades to the typed URL, so a URL is always returned.
+//
+// This calls the wiki API, so use it only on the Execute path; dry-run builds
+// the typed URL with ResourceURLOrBuild instead (no probe).
+func ResolveFetchURL(runtime *RuntimeContext, declaredKind, input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.Contains(input, "://") {
+		return input
+	}
+	if node, ok := probeWikiNode(runtime, input); ok {
+		if u, ok := wikiNodeFetchURL(runtime.Brand(), node); ok {
+			return u
+		}
+	}
+	return ResourceURLOrBuild(runtime.Brand(), declaredKind, input)
+}
+
+// probeWikiNode asks wiki get_node to interpret token as a node_token
+// (obj_type=wiki, the API default). It returns the node map only when the call
+// succeeds and carries a node_token; any error or a non-node token yields
+// (nil, false) so the caller falls back to a typed URL.
+func probeWikiNode(runtime *RuntimeContext, token string) (map[string]interface{}, bool) {
+	data, err := runtime.CallAPITyped("GET", "/open-apis/wiki/v2/spaces/get_node",
+		map[string]interface{}{"token": token, "obj_type": "wiki"}, nil)
+	if err != nil {
+		return nil, false
+	}
+	node := GetMap(data, "node")
+	if strings.TrimSpace(GetString(node, "node_token")) == "" {
+		return nil, false
+	}
+	return node, true
+}
+
+// wikiNodeFetchURL builds the /wiki/<token> URL for a resolved wiki node. It
+// uses node_token, except for a shortcut node (node_type=shortcut) where it
+// follows origin_node_token to the real node so eqa fetches the original doc,
+// not the shortcut. Returns ("", false) when node_token is absent.
+func wikiNodeFetchURL(brand core.LarkBrand, node map[string]interface{}) (string, bool) {
+	nodeToken := strings.TrimSpace(GetString(node, "node_token"))
+	if nodeToken == "" {
+		return "", false
+	}
+	if strings.EqualFold(strings.TrimSpace(GetString(node, "node_type")), "shortcut") {
+		if origin := strings.TrimSpace(GetString(node, "origin_node_token")); origin != "" {
+			nodeToken = origin
+		}
+	}
+	return BuildResourceURL(brand, "wiki", nodeToken), true
+}
+
 // ResourceRef holds the parsed type and token from a Lark resource URL.
 type ResourceRef struct {
 	Type  string // e.g. "docx", "bitable", "wiki", "sheet", etc.

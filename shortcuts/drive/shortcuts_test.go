@@ -17,6 +17,7 @@ func TestShortcutsIncludesExpectedCommands(t *testing.T) {
 		"+download",
 		"+preview",
 		"+cover",
+		"+fetch",
 		"+version-history",
 		"+version-get",
 		"+version-revert",

@@ -147,3 +147,34 @@ func TestBuildResourceURL(t *testing.T) {
 		})
 	}
 }
+
+func TestResourceURLOrBuild(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		brand core.LarkBrand
+		kind  string
+		input string
+		want  string
+	}{
+		{"bare token expands", core.BrandFeishu, "sheet", "shtcnABC", "https://www.feishu.cn/sheets/shtcnABC"},
+		{"bare bitable token expands", core.BrandFeishu, "bitable", "bascnABC", "https://www.feishu.cn/base/bascnABC"},
+		{"lark brand host", core.BrandLark, "docx", "doxcnABC", "https://www.larksuite.com/docx/doxcnABC"},
+		{"empty brand defaults feishu", core.LarkBrand(""), "docx", "doxcnABC", "https://www.feishu.cn/docx/doxcnABC"},
+		{"full url passthrough", core.BrandFeishu, "sheet", "https://x.feishu.cn/sheets/shtABC", "https://x.feishu.cn/sheets/shtABC"},
+		{"url with query passthrough", core.BrandFeishu, "sheet", "https://x.feishu.cn/sheets/shtABC?sheet=s1", "https://x.feishu.cn/sheets/shtABC?sheet=s1"},
+		{"wiki url passthrough", core.BrandFeishu, "docx", "https://x.feishu.cn/wiki/wikABC", "https://x.feishu.cn/wiki/wikABC"},
+		{"unknown kind passes token through", core.BrandFeishu, "calendar", "calABC", "calABC"},
+		{"whitespace trimmed then expanded", core.BrandFeishu, "sheet", "  shtcnABC  ", "https://www.feishu.cn/sheets/shtcnABC"},
+		{"empty input", core.BrandFeishu, "sheet", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResourceURLOrBuild(tt.brand, tt.kind, tt.input); got != tt.want {
+				t.Errorf("ResourceURLOrBuild(%q, %q, %q) = %q, want %q", tt.brand, tt.kind, tt.input, got, tt.want)
+			}
+		})
+	}
+}
