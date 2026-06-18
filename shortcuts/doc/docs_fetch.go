@@ -19,7 +19,7 @@ var DocsFetch = common.Shortcut{
 	Command:     "+fetch",
 	Description: "Fetch Lark document content",
 	Risk:        "read",
-	Scopes:      []string{"docx:document:readonly"},
+	Scopes:      []string{"docx:document:readonly", "wiki:node:retrieve"},
 	AuthTypes:   []string{"user", "bot"},
 	HasFormat:   true,
 	PostMount:   installDocsShortcutHelp("+fetch"),

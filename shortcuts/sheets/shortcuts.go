@@ -40,6 +40,7 @@ func shortcutList() []common.Shortcut {
 		SheetSetTabColor,
 		WorkbookCreate,
 		WorkbookExport,
+		SheetFetch,
 
 		// lark_sheet_sheet_structure
 		SheetInfo,
