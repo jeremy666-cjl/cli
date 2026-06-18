@@ -28,6 +28,12 @@ func v2FetchFlags() []common.Flag {
 		{Name: "context-before", Desc: "range/keyword/section context: sibling blocks before selected top-level blocks", Type: "int", Default: "0"},
 		{Name: "context-after", Desc: "range/keyword/section context: sibling blocks after selected top-level blocks", Type: "int", Default: "0"},
 		{Name: "max-depth", Desc: "outline heading level cap; other scopes subtree depth where -1 is unlimited and 0 is block only", Type: "int", Default: "-1"},
+		{Name: "inline-embeds", Type: "bool", Default: "false", Desc: "markdown only: expand embedded bitable/sheet to GFM via the qa fetch service (falls back to native markdown on any failure)"},
+		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "inline-embeds: cap each materialized table to N data rows (0 = no limit)"},
+		{Name: "image-urls", Default: "one", Enum: []string{"none", "one", "full"}, Desc: "inline-embeds: image rendering — none (caption only) | one (single URL + WxH) | full (all routes)"},
+		{Name: "full", Type: "bool", Default: "false", Desc: "markdown only: return the whole document in one response (disable the default auto-pagination of large docs)"},
+		{Name: "page-token", Desc: "markdown only: continue a paginated read from a prior response's next_page_token"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "markdown only: per-page token budget hint for large docs (0 = server default; clamped server-side)"},
 	}
 }
 
@@ -41,13 +47,97 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if _, err := parseDocumentRef(runtime.Str("doc")); err != nil {
 		return err
 	}
+	if err := validateFetchDetail(runtime); err != nil {
+		return err
+	}
 	if err := validateReadModeFlags(runtime); err != nil {
+		return err
+	}
+	if err := validateInlineEmbeds(runtime); err != nil {
+		return err
+	}
+	if err := validateMarkdownFormat(runtime); err != nil {
+		return err
+	}
+	if err := validatePagination(runtime); err != nil {
 		return err
 	}
 	return nil
 }
 
+// validatePagination gates the pagination flags (--full / --page-token /
+// --page-size). They only apply to the whole-doc markdown lane (which routes
+// through the qa fetch service); the native docs_ai xml lane and --scope partial
+// reads have no page cursor. --full is mutually exclusive with --page-token /
+// --page-size (forcing the whole doc contradicts asking for a single page).
+func validatePagination(runtime *common.RuntimeContext) error {
+	full := runtime.Bool("full")
+	token := strings.TrimSpace(runtime.Str("page-token"))
+	size := runtime.Int("page-size")
+	if !full && token == "" && size == 0 {
+		return nil
+	}
+	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
+		return common.ValidationErrorf("--full/--page-token/--page-size require --doc-format markdown (got %q)", format)
+	}
+	if !isWholeDocRead(runtime) {
+		return common.ValidationErrorf("--full/--page-token/--page-size cannot be combined with a --scope partial read")
+	}
+	if size < 0 {
+		return common.ValidationErrorf("--page-size must be >= 0, got %d", size)
+	}
+	if full && (token != "" || size > 0) {
+		return common.ValidationErrorf("--full cannot be combined with --page-token/--page-size")
+	}
+	return nil
+}
+
+// validateInlineEmbeds gates the --inline-embeds flag: it only applies to the
+// markdown lane (the expansion path has no xml structure).
+func validateInlineEmbeds(runtime *common.RuntimeContext) error {
+	if !runtime.Bool("inline-embeds") {
+		return nil
+	}
+	if format := strings.TrimSpace(runtime.Str("doc-format")); format != "markdown" {
+		return common.ValidationErrorf("--inline-embeds requires --doc-format markdown (got %q)", format)
+	}
+	return nil
+}
+
+// validateMarkdownFormat gates the markdown lane, which routes through the qa
+// fetch service — "mix" (readable md + block-id anchors) when plain, the
+// --inline-embeds expansion otherwise. Both materialize tables, so the same
+// non-negative --embed-max-rows rule applies.
+func validateMarkdownFormat(runtime *common.RuntimeContext) error {
+	if strings.TrimSpace(runtime.Str("doc-format")) != "markdown" {
+		return nil
+	}
+	if v := runtime.Int("embed-max-rows"); v < 0 {
+		return common.ValidationErrorf("--embed-max-rows must be >= 0, got %d", v)
+	}
+	return nil
+}
+
+// isWholeDocRead reports whether this fetch reads the whole document (no --scope
+// or --scope full). Only whole-doc markdown routes through the qa fetch service
+// (mix/inline-embeds), which has no partial-read input; any --scope partial read
+// falls through to native docs_ai, which honors read_option for markdown too.
+func isWholeDocRead(runtime *common.RuntimeContext) bool {
+	mode := strings.TrimSpace(runtime.Str("scope"))
+	return mode == "" || mode == "full"
+}
+
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	if format == "markdown" && isWholeDocRead(runtime) {
+		// Whole-doc markdown goes through the qa fetch service: --inline-embeds
+		// expands embeds to GFM, plain markdown gets the "mix" block-id render.
+		// A --scope partial read skips this and dry-runs the native docs_ai path.
+		if runtime.Bool("inline-embeds") {
+			return dryRunInlineEmbeds(runtime)
+		}
+		return dryRunMix(runtime)
+	}
 	// Validate has already accepted --doc; parseDocumentRef cannot fail here.
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 	body := buildFetchBody(runtime)
@@ -59,9 +149,30 @@ func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.Dr
 		Set("document_id", ref.Token)
 }
 
-func executeFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
+func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
+	// Whole-doc markdown routes through the qa fetch service: plain markdown →
+	// "mix" (readable md + block-id anchors), --inline-embeds → embeds expanded
+	// to GFM. A --scope partial read skips this (eqa has no read_option) and
+	// falls through to native docs_ai, which honors read_option for markdown. On
+	// any qa failure the run* helper returns handled=false and we likewise fall
+	// through to native docs_ai markdown below — "只增不减".
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	if format == "markdown" && isWholeDocRead(runtime) {
+		if runtime.Bool("inline-embeds") {
+			if handled, err := runInlineEmbedsFetch(ctx, runtime); handled {
+				return err
+			}
+		} else {
+			if handled, err := runMixFetch(ctx, runtime); handled {
+				return err
+			}
+		}
+	}
+
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 
+	// On fallback, body["format"] is already "markdown" (the native docs_ai
+	// markdown output), so no remap is needed.
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", ref.Token)
 	body := buildFetchBody(runtime)
 
@@ -173,6 +284,26 @@ func effectiveFetchDetail(runtime *common.RuntimeContext) string {
 		return "simple"
 	}
 	return detail
+}
+
+// validateFetchDetail gates --detail by format. Whole-doc plain markdown routes
+// through the qa "mix" lane, which carries {#blockid} anchors, so with-ids/full
+// are allowed there. A --scope partial read (native docs_ai fragment, no mix
+// anchors) and --doc-format markdown --inline-embeds (the expansion path) both
+// lack block ids, so with-ids/full are rejected there.
+func validateFetchDetail(runtime *common.RuntimeContext) error {
+	format := strings.TrimSpace(runtime.Str("doc-format"))
+	detail := strings.TrimSpace(runtime.Str("detail"))
+	if format == "" || format == "xml" {
+		return nil
+	}
+	if format == "markdown" && !runtime.Bool("inline-embeds") && isWholeDocRead(runtime) {
+		return nil
+	}
+	if detail == "with-ids" || detail == "full" {
+		return errs.NewValidationError(errs.SubtypeInvalidArgument, "--detail %s has no block ids with --doc-format markdown here (a --scope partial read or --inline-embeds); use whole-doc --doc-format markdown, or --doc-format xml for an addressable partial read", detail).WithParam("--detail")
+	}
+	return nil
 }
 
 func addFetchDetailDowngradeWarning(runtime *common.RuntimeContext, data map[string]interface{}) string {

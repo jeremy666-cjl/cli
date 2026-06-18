@@ -30,6 +30,7 @@ import (
 	"github.com/larksuite/cli/shortcuts/markdown"
 	"github.com/larksuite/cli/shortcuts/minutes"
 	"github.com/larksuite/cli/shortcuts/note"
+	"github.com/larksuite/cli/shortcuts/search"
 	"github.com/larksuite/cli/shortcuts/sheets"
 	sheetsbackward "github.com/larksuite/cli/shortcuts/sheets/backward"
 	"github.com/larksuite/cli/shortcuts/slides"
@@ -78,6 +79,7 @@ func init() {
 	allShortcuts = append(allShortcuts, markdown.Shortcuts()...)
 	allShortcuts = append(allShortcuts, slides.Shortcuts()...)
 	allShortcuts = append(allShortcuts, minutes.Shortcuts()...)
+	allShortcuts = append(allShortcuts, search.Shortcuts()...)
 	allShortcuts = append(allShortcuts, task.Shortcuts()...)
 	allShortcuts = append(allShortcuts, vc.Shortcuts()...)
 	allShortcuts = append(allShortcuts, note.Shortcuts()...)

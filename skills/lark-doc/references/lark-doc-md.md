@@ -2,6 +2,8 @@
 
 `docs +fetch --api-version v2` / `docs +create --api-version v2` / `docs +update --api-version v2` 使用 `--doc-format markdown` 时适用。
 
+> **注意（fetch）**：`docs +fetch --doc-format markdown` 输出在标题/表/图/画板后带 `{#blockid}` 块级锚点（可直接用于 `docs +update --block-id`）；加 `--inline-embeds` 则改为展开内嵌电子表格/多维表格、但**不带**块级锚点。本转义参考主要面向写入（create/update）。
+
 ## 创建文档标题
 
 使用 `docs +create --doc-format markdown` 创建文档时，文档标题必须写成内容开头唯一的一级标题：`# 标题`。正文标题从 `##` 开始，不要使用多个一级标题；否则标题可能无法被提取并显示为 `Untitled`。
