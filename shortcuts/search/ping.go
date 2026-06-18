@@ -21,7 +21,6 @@ const pingPath = "/ping"
 // agent-friendly.
 type pingResult struct {
 	FaasURL       string `json:"faas_url"`
-	OpenAPIURL    string `json:"open_api_url"`
 	UserOpenID    string `json:"user_open_id"`
 	UserUID       int64  `json:"user_uid"`
 	Locale        string `json:"locale"`
@@ -44,7 +43,6 @@ var SearchPing = common.Shortcut{
 	Hidden:      true,
 	Tips: []string{
 		"Configure the gateway URL: export LARK_CLI_QA_FAAS_URL=https://<faas-host>",
-		"Configure the byte openapi URL (used for openid2uid): export LARK_CLI_BYTE_OPENAPI_URL=https://<openapi-host>",
 	},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		api := common.NewDryRunAPI().
@@ -74,7 +72,6 @@ func executePing(ctx context.Context, runtime *common.RuntimeContext) error {
 		return nil
 	}
 	res.FaasURL = faasbridge.BaseURL()
-	res.OpenAPIURL = faasbridge.OpenAPIBaseURL()
 
 	if _, err := client.Get(ctx, ident, pingPath); err != nil {
 		res.FaasReachable = false
@@ -100,7 +97,6 @@ func writePingText(w io.Writer, res pingResult) {
 	fmt.Fprintf(w, "locale       : %s\n", res.Locale)
 	fmt.Fprintf(w, "timezone     : %s\n", res.Timezone)
 	fmt.Fprintf(w, "faas_url     : %s\n", res.FaasURL)
-	fmt.Fprintf(w, "open_api_url : %s\n", res.OpenAPIURL)
 	if res.FaasReachable {
 		fmt.Fprintln(w, "faas_status  : ok")
 	} else {
