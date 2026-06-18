@@ -29,18 +29,24 @@ const (
 	openAPIBaseEnv        = "LARK_CLI_BYTE_OPENAPI_URL"
 	openid2UIDPath        = "/open-apis/exchange/v3/openid2uid/"
 	openid2UIDHTTPTimeout = 10 * time.Second
+
+	// TEMP(for_doubao): see client.go. Env still wins; do NOT merge to main.
+	openAPIBaseDefault = "https://fsopen.bytedance.net"
 )
 
 // openAPIBaseURL returns the configured byte openapi base, trimming trailing
 // slashes so callers can safely append a path.
 func openAPIBaseURL() string {
-	v := strings.TrimSpace(os.Getenv(openAPIBaseEnv))
-	return strings.TrimRight(v, "/")
+	if v, ok := os.LookupEnv(openAPIBaseEnv); ok {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return openAPIBaseDefault
 }
 
-// OpenAPIBaseURL exposes the configured byte openapi base (used for openid2uid),
-// or "" when unset. Exposed so diagnostics like `search +ping` can report which
-// gateway resolves open_id → uid without constructing a live lookup.
+// OpenAPIBaseURL exposes the configured byte openapi base (used for openid2uid).
+// The env value wins when present (even ""); when unset it falls back to
+// openAPIBaseDefault (TEMP(for_doubao)). Exposed so diagnostics like `search
+// +ping` can report which gateway resolves open_id → uid without a live lookup.
 func OpenAPIBaseURL() string {
 	return openAPIBaseURL()
 }

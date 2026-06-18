@@ -29,17 +29,35 @@ const (
 	// empty, the request goes to the prod faas instance.
 	faasPPEEnv = "LARK_CLI_QA_FAAS_PPE"
 
+	// TEMP(for_doubao): baked-in fallbacks so the doubao build runs without
+	// exporting the internal gateway envs. Env still wins; do NOT merge to main.
+	faasBaseDefault = "https://b3v1i8lq.fn.bytedance.net"
+	faasPPEDefault  = "ppe_qa_fetch_with_cli"
+
 	// faasHTTPTimeout caps the total time a single faas request can take. The
 	// faas → eqa chain is supposed to be interactive; anything past 30s is
 	// almost certainly a hang.
 	faasHTTPTimeout = 30 * time.Second
 )
 
-// BaseURL returns the configured faas gateway base (trailing slash trimmed), or
-// "" when unset. Exposed so callers can render dry-run output without
-// constructing a live Client.
+// BaseURL returns the configured faas gateway base (trailing slash trimmed). The
+// env value wins when present (even ""); when the env is unset it falls back to
+// faasBaseDefault (TEMP(for_doubao)). Exposed so callers can render dry-run output
+// without constructing a live Client.
 func BaseURL() string {
-	return strings.TrimRight(strings.TrimSpace(os.Getenv(faasBaseEnv)), "/")
+	if v, ok := os.LookupEnv(faasBaseEnv); ok {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return faasBaseDefault
+}
+
+// faasPPE returns the X-Tt-Env PPE tag: the env value when set (even empty), or
+// the baked-in default when the env is unset. TEMP(for_doubao).
+func faasPPE() string {
+	if v, ok := os.LookupEnv(faasPPEEnv); ok {
+		return strings.TrimSpace(v)
+	}
+	return faasPPEDefault
 }
 
 // Client is the thin HTTP client targeting the qa faas gateway. We do not reuse
@@ -154,7 +172,7 @@ func (c *Client) injectIdentityHeaders(req *http.Request, ident Identity) {
 	if ident.Timezone != "" {
 		req.Header.Set("X-Qa-Cli-Timezone", ident.Timezone)
 	}
-	if ppe := strings.TrimSpace(os.Getenv(faasPPEEnv)); ppe != "" {
+	if ppe := faasPPE(); ppe != "" {
 		req.Header.Set("x-use-ppe", "1")
 		req.Header.Set("env", "pre_release")
 		req.Header.Set("X-Tt-Env", ppe)
