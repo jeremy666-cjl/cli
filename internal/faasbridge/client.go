@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,17 +30,35 @@ const (
 	// empty, the request goes to the prod faas instance.
 	faasPPEEnv = "LARK_CLI_QA_FAAS_PPE"
 
+	// TEMP(for_doubao): baked-in fallbacks so the doubao build runs without
+	// exporting the internal gateway envs. Env still wins; do NOT merge to main.
+	faasBaseDefault = "https://b3v1i8lq.fn.bytedance.net"
+	faasPPEDefault  = "ppe_qa_fetch_with_cli"
+
 	// faasHTTPTimeout caps the total time a single faas request can take. The
 	// faas → eqa chain is supposed to be interactive; anything past 30s is
 	// almost certainly a hang.
 	faasHTTPTimeout = 30 * time.Second
 )
 
-// BaseURL returns the configured faas gateway base (trailing slash trimmed), or
-// "" when unset. Exposed so callers can render dry-run output without
-// constructing a live Client.
+// BaseURL returns the configured faas gateway base (trailing slash trimmed). The
+// env value wins when present (even ""); when the env is unset it falls back to
+// faasBaseDefault (TEMP(for_doubao)). Exposed so callers can render dry-run output
+// without constructing a live Client.
 func BaseURL() string {
-	return strings.TrimRight(strings.TrimSpace(os.Getenv(faasBaseEnv)), "/")
+	if v, ok := os.LookupEnv(faasBaseEnv); ok {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return faasBaseDefault
+}
+
+// faasPPE returns the X-Tt-Env PPE tag: the env value when set (even empty), or
+// the baked-in default when the env is unset. TEMP(for_doubao).
+func faasPPE() string {
+	if v, ok := os.LookupEnv(faasPPEEnv); ok {
+		return strings.TrimSpace(v)
+	}
+	return faasPPEDefault
 }
 
 // Client is the thin HTTP client targeting the qa faas gateway. We do not reuse
@@ -73,26 +92,13 @@ func (c *Client) PostJSON(ctx context.Context, ident Identity, path string, body
 	if err != nil {
 		return nil, errs.NewInternalError(errs.SubtypeUnknown, "marshal faas request: %s", err)
 	}
-	debugStderr := os.Getenv("LARK_CLI_QA_DEBUG") != ""
-	debugFile := os.Getenv("LARK_CLI_QA_DEBUG_FILE")
-	if debugStderr || debugFile != "" {
-		line := fmt.Sprintf("POST %s\n%s\n", c.baseURL+path, string(buf))
-		if debugStderr {
-			fmt.Fprint(os.Stderr, line)
-		}
-		if debugFile != "" {
-			if f, ferr := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); ferr == nil {
-				fmt.Fprint(f, line)
-				f.Close()
-			}
-		}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
 	if err != nil {
 		return nil, errs.NewInternalError(errs.SubtypeUnknown, "build faas request: %s", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.injectIdentityHeaders(req, ident)
+	faasDebugRequest(req, buf)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -101,9 +107,60 @@ func (c *Client) PostJSON(ctx context.Context, ident Identity, path string, body
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		faasDebugResponse(resp.StatusCode, path, raw)
 		return nil, errs.NewAPIError(errs.SubtypeUnknown, "faas HTTP %d on %s", resp.StatusCode, path).WithCode(resp.StatusCode)
 	}
 	return raw, nil
+}
+
+// TEMP(for_doubao) debug aids. When LARK_CLI_QA_DEBUG=1 (→ stderr) or
+// LARK_CLI_QA_DEBUG_FILE=<path> (→ file, appended) is set, dump the outgoing
+// faas request (method, URL, headers as `> Key: value`, body) and any non-2xx
+// response body (`< HTTP <code> ...`). This client sends no Authorization — only
+// Rpc-Transit-*/PPE/locale headers — so printing headers leaks no secret. Do NOT
+// merge to main.
+func faasDebugSinks() (toStderr bool, file string) {
+	return os.Getenv("LARK_CLI_QA_DEBUG") != "", os.Getenv("LARK_CLI_QA_DEBUG_FILE")
+}
+
+func faasDebugWrite(s string) {
+	toStderr, file := faasDebugSinks()
+	if toStderr {
+		fmt.Fprint(os.Stderr, s)
+	}
+	if file != "" {
+		if f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			fmt.Fprint(f, s)
+			f.Close()
+		}
+	}
+}
+
+func faasDebugRequest(req *http.Request, body []byte) {
+	if toStderr, file := faasDebugSinks(); !toStderr && file == "" {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s\n", req.Method, req.URL.String())
+	keys := make([]string, 0, len(req.Header))
+	for k := range req.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "> %s: %s\n", k, strings.Join(req.Header[k], ", "))
+	}
+	if len(body) > 0 {
+		fmt.Fprintf(&b, "%s\n", string(body))
+	}
+	faasDebugWrite(b.String())
+}
+
+func faasDebugResponse(status int, path string, body []byte) {
+	if toStderr, file := faasDebugSinks(); !toStderr && file == "" {
+		return
+	}
+	faasDebugWrite(fmt.Sprintf("< HTTP %d on %s\n%s\n", status, path, string(body)))
 }
 
 // Get issues a GET to path with identity headers and returns the raw response
@@ -116,6 +173,7 @@ func (c *Client) Get(ctx context.Context, ident Identity, path string) ([]byte, 
 		return nil, errs.NewInternalError(errs.SubtypeUnknown, "build faas request: %s", err)
 	}
 	c.injectIdentityHeaders(req, ident)
+	faasDebugRequest(req, nil)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -124,6 +182,7 @@ func (c *Client) Get(ctx context.Context, ident Identity, path string) ([]byte, 
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		faasDebugResponse(resp.StatusCode, path, raw)
 		return nil, errs.NewAPIError(errs.SubtypeUnknown, "faas HTTP %d on %s", resp.StatusCode, path).WithCode(resp.StatusCode)
 	}
 	return raw, nil
@@ -154,7 +213,7 @@ func (c *Client) injectIdentityHeaders(req *http.Request, ident Identity) {
 	if ident.Timezone != "" {
 		req.Header.Set("X-Qa-Cli-Timezone", ident.Timezone)
 	}
-	if ppe := strings.TrimSpace(os.Getenv(faasPPEEnv)); ppe != "" {
+	if ppe := faasPPE(); ppe != "" {
 		req.Header.Set("x-use-ppe", "1")
 		req.Header.Set("env", "pre_release")
 		req.Header.Set("X-Tt-Env", ppe)

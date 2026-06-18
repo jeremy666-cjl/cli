@@ -17,8 +17,8 @@ import (
 
 // setSearchDryRunEnv scopes config to a temp dir so the test never touches the
 // user's real CLI config, plants a fake app credential so identity resolution at
-// boot doesn't error, and forces the faas/openapi gateway URLs empty so dry-run
-// asserts the "${LARK_CLI_QA_FAAS_URL}" placeholder behavior deterministically
+// boot doesn't error, and forces the faas gateway URL empty so dry-run asserts
+// the "${LARK_CLI_QA_FAAS_URL}" placeholder behavior deterministically
 // regardless of the developer's ambient env.
 func setSearchDryRunEnv(t *testing.T) {
 	t.Helper()
@@ -27,7 +27,6 @@ func setSearchDryRunEnv(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_APP_SECRET", "search_dryrun_test_secret")
 	t.Setenv("LARKSUITE_CLI_BRAND", "feishu")
 	t.Setenv("LARK_CLI_QA_FAAS_URL", "")
-	t.Setenv("LARK_CLI_BYTE_OPENAPI_URL", "")
 }
 
 // TestSearchDryRun pins the request shape for the runnable `lark-cli search`

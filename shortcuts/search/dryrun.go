@@ -32,7 +32,7 @@ func dryRunCommon(api *common.DryRunAPI) *common.DryRunAPI {
 	api.Set("headers", map[string]string{
 		"Content-Type":        "application/json",
 		"Rpc-Transit-APP-ID":  "<runtime.Config.AppID, cli_xxx string>",
-		"Rpc-Transit-USER-ID": "<resolved via openid2uid, int64>",
+		"Rpc-Transit-USER-ID": "<resolved via faas openid_to_userid, int64>",
 		"X-Qa-Cli-Locale":     "<env LANG | zh_CN>",
 		"X-Qa-Cli-Timezone":   "<env TZ | Asia/Shanghai>",
 	})

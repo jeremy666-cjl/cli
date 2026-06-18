@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package faasbridge is the shared cli→faas-gateway bridge. It resolves the
-// current user's identity (open_id → uid via fsopen, with a process cache) and
+// current user's identity (open_id → uid via the qa faas gateway) and
 // posts JSON to the qa faas gateway with the identity headers the gateway
 // expects. It is transport-only and content-agnostic: callers own the
 // request/response contracts for their specific faas routes (e.g. the docs
@@ -21,7 +21,7 @@ import (
 // Identity captures the per-request user context the faas gateway expects.
 // AppID is the CLI's `cli_xxx` app identifier (string) — faas accepts it as-is;
 // tenant_id is resolved server-side from uid, so the CLI doesn't send it. UID
-// comes from openid2uid.
+// comes from the faas openid_to_userid route.
 type Identity struct {
 	OpenID   string
 	UID      int64
@@ -31,8 +31,8 @@ type Identity struct {
 }
 
 // ResolveCurrentIdentity walks UAT (via runtime) → OpenID (already on Config) →
-// uid (openid2uid using TAT). locale / timezone are read from env with safe
-// fallbacks; we do not query a remote service for them.
+// uid (faas openid_to_userid, no token). locale / timezone are read from env
+// with safe fallbacks; we do not query a remote service for them.
 func ResolveCurrentIdentity(ctx context.Context, runtime *common.RuntimeContext) (Identity, error) {
 	openID := strings.TrimSpace(runtime.UserOpenId())
 	if openID == "" {
@@ -47,16 +47,22 @@ func ResolveCurrentIdentity(ctx context.Context, runtime *common.RuntimeContext)
 		return Identity{}, err
 	}
 
-	uid, err := lookupUIDForOpenID(ctx, runtime, openID)
-	if err != nil {
-		return Identity{}, err
-	}
-
 	appID := strings.TrimSpace(runtime.Config.AppID)
 	if appID == "" {
 		return Identity{}, errs.NewAuthenticationError(errs.SubtypeTokenMissing,
 			"no app_id resolved in current profile; cannot identify caller to faas").
 			WithHint("run `lark-cli auth login` for the target profile")
+	}
+
+	// uid is resolved server-side by the faas gateway (no UAT/TAT needed); the
+	// open_id we already hold from config is the only input.
+	client, err := NewClient()
+	if err != nil {
+		return Identity{}, err
+	}
+	uid, err := resolveUID(ctx, client, Identity{OpenID: openID, AppID: appID}, openID)
+	if err != nil {
+		return Identity{}, err
 	}
 
 	return Identity{
