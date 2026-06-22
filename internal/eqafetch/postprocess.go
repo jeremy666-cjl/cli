@@ -133,19 +133,41 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// truncateHintFmt is the one-line notice inserted (outside the table) when a
-// materialized table is truncated. %d = number of dropped data rows.
-const truncateHintFmt = "> 还有 %d 行(用 base +record-list 取全量)"
+// truncateHintFmt is the default one-line notice inserted (outside the table)
+// when a materialized table is truncated. %d = number of dropped data rows.
+const truncateHintFmt = "> 还有 %d 行"
+
+// TruncateHintFor returns the truncation-notice format string for a fetch type.
+// sheet points the reader at sheets +cells-get and bitable at base +record-list
+// (the native commands that return full rows); slides / file / doc embed tables
+// with no "fetch full" equivalent get the plain notice. The format must contain
+// exactly one %d (dropped data-row count).
+func TruncateHintFor(fetchType string) string {
+	switch fetchType {
+	case "sheet":
+		return "> 还有 %d 行(用 sheets +cells-get 取全量)"
+	case "bitable":
+		return "> 还有 %d 行(用 base +record-list 取全量)"
+	default:
+		return truncateHintFmt
+	}
+}
 
 var gfmDelimiterRe = regexp.MustCompile(`^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$`)
 
 // TruncateGFMTables caps each GFM table in md to maxRows data rows, inserting a
 // hint line after the kept rows (outside the table). maxRows <= 0 disables
-// truncation. Code-fenced regions are skipped so pipes inside code blocks are
-// never mistaken for tables. Each table is truncated independently.
-func TruncateGFMTables(md string, maxRows int) string {
+// truncation. hintFmt is the notice format (one %d = dropped rows); an empty
+// hintFmt falls back to the plain "> 还有 %d 行" notice. Use TruncateHintFor to
+// point sheet/base at their native full-row commands. Code-fenced regions are
+// skipped so pipes inside code blocks are never mistaken for tables. Each table
+// is truncated independently.
+func TruncateGFMTables(md string, maxRows int, hintFmt string) string {
 	if maxRows <= 0 {
 		return md
+	}
+	if strings.TrimSpace(hintFmt) == "" {
+		hintFmt = truncateHintFmt
 	}
 	lines := strings.Split(md, "\n")
 	out := make([]string, 0, len(lines))
@@ -172,7 +194,7 @@ func TruncateGFMTables(md string, maxRows int) string {
 				j++
 			}
 			if dropped > 0 {
-				out = append(out, "", fmt.Sprintf(truncateHintFmt, dropped))
+				out = append(out, "", fmt.Sprintf(hintFmt, dropped))
 			}
 			i = j
 			continue

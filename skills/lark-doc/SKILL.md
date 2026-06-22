@@ -32,11 +32,12 @@ lark-cli docs +update --api-version v2 --doc "文档URL或token" --command appen
 **未读完以上文件就执行相应操作会导致参数选择错误或格式错误。**
 
 > **格式选择规则（全局）：**
-> - **读取 / 浏览 / 总结场景**（`docs +fetch`）：意图是**读内容 / 总结 **时，优先用markdown（`--doc-format markdown`）—— 该格式会给标题/表/图/画板挂 `{#blockid}` 锚点；文档含内嵌多维表又要其数据时，加 `--inline-embeds` 把内嵌表展成 GFM。
+> - **读取 / 浏览 / 总结场景**（`docs +fetch`）：意图是**读内容 / 总结 ** (编辑后复核结果的除外)时，优先用markdown（`--doc-format markdown`）—— 该格式会给标题/表/图/画板挂 `{#blockid}` 锚点；文档含内嵌多维表又要其数据时，加 `--inline-embeds` 把内嵌表展成 GFM。
 > - **创建 / 导入场景**（`docs +create`，或 `docs +update --command append/overwrite` 的整段写入）：XML 和 Markdown 都可以。用户提供 `.md` 本地文件、或明确说"导入 Markdown"时，直接用 Markdown；否则默认 XML（可用 callout、grid、checkbox 等富 block）。
 > - **精准编辑场景**（`docs +update` 的 `str_replace` / `block_insert_after` / `block_replace` / `block_delete` / `block_move_after` 等局部精修指令）：优先使用 XML（`--doc-format xml`，即默认值）。XML 能稳定表达 block 结构和样式，局部精修更可控；不要因为 Markdown 更简单就自行切换。
 
 ## 快速决策
+- 要把**任意**云文档 / 表格 / 多维表 / 幻灯片 / 文件 / 妙记**整篇读成 markdown 快照**（不限于 doc，或不需要精读）→ 用 [`drive +fetch`](../lark-drive/references/lark-drive-fetch.md)（统一入口，自动识别类型、解包 wiki）；doc 精读 / 局部读取 / 编辑准备仍用本 skill 的 `docs +fetch --api-version v2`。
 - 先判定任务路径：找文档 / 导入导出走 [`lark-drive`](../lark-drive/SKILL.md)；只读 / 摘要用 `docs +fetch` 默认 `simple`；明确旧文本 → 新文本直接 `str_replace`；只有 block 链接、评论锚点、插入 / 替换 / 删除 / 移动才局部 fetch `with-ids`；保真改写已有内容才读 `full`
 - block 直达链接格式：`文档基础 URL#block_id`；没有 block_id 时局部 fetch `with-ids`
 - 连续执行多个文档写操作时，必须按 [`lark-doc-update.md`](references/lark-doc-update.md) 的「Block ID 生命周期」判断旧 block ID 是否还能复用；`overwrite` / `block_replace` / `block_delete` 后不要复用受影响的旧 ID，插入 / 复制后要重新 fetch 才能拿到新 block ID

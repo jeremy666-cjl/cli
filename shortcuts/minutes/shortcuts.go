@@ -16,6 +16,5 @@ func Shortcuts() []common.Shortcut {
 		MinutesTodo,
 		MinutesSpeakerReplace,
 		MinutesWordReplace,
-		MinutesFetch,
 	}
 }
