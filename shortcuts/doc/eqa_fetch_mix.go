@@ -17,7 +17,11 @@ import (
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
-// runMixFetch handles `docs +fetch --doc-format mix`. mix asks eqa for the qa
+// runMixFetch handles `docs +fetch --doc-format mix`. It builds MixOptions from
+// the docs +fetch flags, delegates the eqa mix render to FetchMix, and routes a
+// failure: a first-page read falls back to native markdown (handled=false →
+// executeFetchV2 continues), a --page-token continuation returns a typed error
+// (native docs_ai can't honor a cursor). mix asks eqa for the qa
 // XMLDocTreeRender output (ContentWithBlockID — XML with real block ids) and
 // renders it to "shallow id" markdown: a readable md body plus {#blockid}
 // anchors on headings / tables / images / boards, so a model can address a block
@@ -25,84 +29,89 @@ import (
 // through to the native docs_ai path (remapped to markdown) — "只增不减".
 func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled bool, err error) {
 	continuation := isPageContinuation(runtime)
-	client, cerr := faasbridge.NewClient()
-	if cerr != nil {
-		return mixFail(runtime, continuation, "faas-config", cerr)
+	opts := MixOptions{
+		ImageMode: eqafetch.ParseImageMode(runtime.Str("image-urls")),
+		MaxRows:   runtime.Int("embed-max-rows"),
+		Full:      runtime.Bool("full"),
+		PageToken: strings.TrimSpace(runtime.Str("page-token")),
+		PageSize:  runtime.Int("page-size"),
 	}
-	ident, ierr := faasbridge.ResolveCurrentIdentity(ctx, runtime)
-	if ierr != nil {
-		return mixFail(runtime, continuation, "identity", ierr)
-	}
-
-	req := eqafetch.NewRequest(docEqaResolvedURL(runtime))
-	req.WithBlockID = true
-	applyDocPagination(runtime, &req)
-	resp, ferr := eqafetch.Fetch(ctx, client, ident, req)
+	result, ferr := FetchMix(ctx, runtime, docEqaResolvedURL(runtime), opts)
 	if ferr != nil {
-		return mixFail(runtime, continuation, "eqa-call", ferr)
+		return mixFail(runtime, continuation, ferr)
 	}
-	if resp == nil {
-		return mixFail(runtime, continuation, "eqa-empty", fmt.Errorf("nil response"))
-	}
-	if resp.BaseResp != nil && resp.BaseResp.StatusCode != 0 {
-		return mixFail(runtime, continuation, "eqa-status",
-			fmt.Errorf("status %d: %s", resp.BaseResp.StatusCode, resp.BaseResp.StatusMessage))
-	}
-	if strings.TrimSpace(resp.ContentWithBlockID) == "" {
-		// No block-id XML (e.g. eqa not yet wired, or a minutes/unsupported entity).
-		return mixFail(runtime, continuation, "eqa-no-blockid", fmt.Errorf("empty ContentWithBlockID"))
-	}
-
-	md, rerr := renderMix(resp.ContentWithBlockID, resp.QAImageMetaMap,
-		eqafetch.ParseImageMode(runtime.Str("image-urls")), runtime.Int("embed-max-rows"))
-	if rerr != nil {
-		return mixFail(runtime, continuation, "mix-render", rerr)
-	}
-	if strings.TrimSpace(md) == "" {
-		return mixFail(runtime, continuation, "mix-empty", fmt.Errorf("rendered empty content"))
-	}
-
-	emitMix(runtime, resp, md)
+	emitMix(runtime, result)
 	return true, nil
 }
 
 // mixFail routes a qa-side failure: a first-page read falls back to native
 // markdown (handled=false → caller continues), but a --page-token continuation
 // must not fall back (native docs_ai can't honor a cursor), so it returns a
-// typed error (handled=true → caller stops).
-func mixFail(runtime *common.RuntimeContext, continuation bool, stage string, cause error) (bool, error) {
+// typed error (handled=true → caller stops). cause carries a stage-prefixed
+// message from FetchMix (faas-config / identity / eqa-call / ...).
+func mixFail(runtime *common.RuntimeContext, continuation bool, cause error) (bool, error) {
 	if continuation {
-		return true, pageContinuationFailed(stage, cause)
+		return true, pageContinuationFailed("mix", cause)
 	}
-	return mixFallback(runtime, stage, cause)
+	return mixFallback(runtime, cause)
 }
 
 // mixFallback emits one stderr notice and returns (false, nil) so the caller
 // continues to the native path. The user still gets content.
-func mixFallback(runtime *common.RuntimeContext, stage string, cause error) (bool, error) {
+func mixFallback(runtime *common.RuntimeContext, cause error) (bool, error) {
 	fmt.Fprintf(runtime.IO().ErrOut,
-		"[mix] qa fetch unavailable (%s: %v); falling back to native markdown\n",
-		stage, cause)
+		"[mix] qa fetch unavailable (%v); falling back to native markdown\n",
+		cause)
 	return false, nil
 }
 
 // emitMix prints the mix markdown, wrapping it in the same {document:{...}}
 // envelope as the other fetch paths. The "source" discriminator marks the mix
 // route so callers can tell which path produced the content.
-func emitMix(runtime *common.RuntimeContext, resp *eqafetch.Response, md string) {
+func emitMix(runtime *common.RuntimeContext, result *MixResult) {
 	data := map[string]interface{}{
 		"document": map[string]interface{}{
-			"content":     md,
-			"title":       resp.Title,
-			"update_time": resp.UpdateTime,
+			"content":     result.Content,
+			"title":       result.Title,
+			"update_time": result.UpdateTime,
 		},
-		"source": "eqa_mix_format",
+		"source": result.Source,
 	}
-	pageEnvelope(data, resp)
+	if result.HasMore {
+		data["has_more"] = true
+		data["next_page_token"] = result.NextPageToken
+	}
 	runtime.OutFormatRaw(data, nil, func(w io.Writer) {
-		fmt.Fprintln(w, md)
+		fmt.Fprintln(w, result.Content)
 	})
-	emitPageHint(runtime, resp)
+	if result.HasMore && strings.TrimSpace(result.NextPageToken) != "" {
+		fmt.Fprintf(runtime.IO().ErrOut,
+			"[fetch] more content available — re-run with --page-token %s to continue "+
+				"(cursor is tied to this doc version; if the doc changed, re-fetch from the start)\n",
+			result.NextPageToken)
+	}
+}
+
+// FetchNativeMarkdown reads a docx document as plain markdown via the native
+// docs_ai OpenAPI (POST /docs_ai/v1/documents/<token>/fetch, format=markdown) —
+// no eqa, no block-id anchors. It is the drive +fetch fallback when the eqa mix
+// lane is unavailable, mirroring docs +fetch's "只增不减" guarantee. docs +fetch
+// does NOT use this: its own fallback (executeFetchV2) honors --detail/--scope/
+// --lang/--revision-id; drive +fetch has none of those flags, so the simple
+// whole-doc markdown fetch is the right fallback. docToken is the document token
+// (obj_token for a wiki-unwrapped doc).
+func FetchNativeMarkdown(runtime *common.RuntimeContext, docToken string) (content string, err error) {
+	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", docToken)
+	body := map[string]interface{}{"format": "markdown"}
+	injectDocsScene(runtime, body)
+	data, err := runtime.CallAPITyped("POST", apiPath, nil, body)
+	if err != nil {
+		return "", err
+	}
+	if doc, ok := data["document"].(map[string]interface{}); ok {
+		content, _ = doc["content"].(string)
+	}
+	return content, nil
 }
 
 // dryRunMix describes the faas fetch call for --dry-run --doc-format mix.
@@ -145,7 +154,7 @@ func renderMix(xmlContent string, metas map[string]*eqafetch.ImageMeta, mode eqa
 		return "", err
 	}
 	md := mixBlankRunRe.ReplaceAllString(r.out.String(), "\n\n")
-	md = eqafetch.TruncateGFMTables(md, maxRows)
+	md = eqafetch.TruncateGFMTables(md, maxRows, "")
 	return strings.TrimSpace(md) + "\n", nil
 }
 

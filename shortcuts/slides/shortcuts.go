@@ -11,6 +11,5 @@ func Shortcuts() []common.Shortcut {
 		SlidesCreate,
 		SlidesMediaUpload,
 		SlidesReplaceSlide,
-		SlidesFetch,
 	}
 }

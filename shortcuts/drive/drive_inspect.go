@@ -93,43 +93,28 @@ var DriveInspect = common.Shortcut{
 
 		var wikiNode map[string]interface{}
 
-		// Step 2: If type is "wiki", unwrap via get_node API.
+		// Step 2: If type is "wiki", unwrap via the shared get_node helper.
 		if docType == "wiki" {
 			fmt.Fprintf(runtime.IO().ErrOut, "Inspecting wiki node: %s\n", common.MaskToken(docToken))
-			data, err := driveInspectCallWithRetry(
-				ctx,
-				func() (map[string]interface{}, error) {
-					return runtime.CallAPITyped(
-						"GET",
-						"/open-apis/wiki/v2/spaces/get_node",
-						map[string]interface{}{"token": docToken},
-						nil,
-					)
-				},
-			)
+			var node *common.WikiNode
+			err := driveInspectCallWithRetry(ctx, func() error {
+				n, e := common.ResolveWikiNode(runtime, docToken)
+				node = n
+				return e
+			})
 			if err != nil {
-				return driveInspectAnnotateError("resolve_wiki", err)
-			}
-
-			node := common.GetMap(data, "node")
-			objType := common.GetString(node, "obj_type")
-			objToken := common.GetString(node, "obj_token")
-			spaceID := common.GetString(node, "space_id")
-			nodeToken := common.GetString(node, "node_token")
-
-			if objType == "" || objToken == "" {
-				return errs.NewInternalError(errs.SubtypeInvalidResponse, "wiki get_node returned incomplete node data (obj_type=%q, obj_token=%q)", objType, objToken)
+				return annotateDriveError("resolve_wiki", err)
 			}
 
 			wikiNode = map[string]interface{}{
-				"space_id":   spaceID,
-				"node_token": nodeToken,
-				"obj_token":  objToken,
-				"obj_type":   objType,
+				"space_id":   node.SpaceID,
+				"node_token": node.NodeToken,
+				"obj_token":  node.ObjToken,
+				"obj_type":   node.ObjType,
 			}
 
-			docType = objType
-			docToken = objToken
+			docType = node.ObjType
+			docToken = node.ObjToken
 
 			fmt.Fprintf(runtime.IO().ErrOut, "Wiki unwrapped to %s: %s\n", docType, common.MaskToken(docToken))
 		}
@@ -137,7 +122,7 @@ var DriveInspect = common.Shortcut{
 		// Step 3: Call batch_query to verify and get title.
 		title, err := driveInspectFetchMetaTitle(ctx, runtime, docToken, docType)
 		if err != nil {
-			return driveInspectAnnotateError("query_meta", err)
+			return annotateDriveError("query_meta", err)
 		}
 
 		// Step 4: Build the resolved URL.
@@ -206,13 +191,13 @@ func driveInspectResolveRef(runtime *common.RuntimeContext) (common.ResourceRef,
 
 func driveInspectFetchMetaTitle(ctx context.Context, runtime *common.RuntimeContext, token, docType string) (string, error) {
 	var title string
-	_, err := driveInspectCallWithRetry(ctx, func() (map[string]interface{}, error) {
+	err := driveInspectCallWithRetry(ctx, func() error {
 		got, callErr := common.FetchDriveMeta(runtime, token, docType, false)
 		if callErr != nil {
-			return nil, callErr
+			return callErr
 		}
 		title = got.Title
-		return map[string]interface{}{"title": got.Title}, nil
+		return nil
 	})
 	if err != nil {
 		return "", err
@@ -220,23 +205,23 @@ func driveInspectFetchMetaTitle(ctx context.Context, runtime *common.RuntimeCont
 	return title, nil
 }
 
-func driveInspectCallWithRetry(ctx context.Context, call func() (map[string]interface{}, error)) (map[string]interface{}, error) {
+func driveInspectCallWithRetry(ctx context.Context, call func() error) error {
 	var lastErr error
 	for attempt := 0; attempt <= driveInspectRateLimitRetries; attempt++ {
-		data, err := call()
+		err := call()
 		if err == nil {
-			return data, nil
+			return nil
 		}
 		lastErr = err
 		if !driveInspectShouldRetry(err) || attempt == driveInspectRateLimitRetries {
-			return nil, err
+			return err
 		}
 		backoff := driveInspectRetryInitialBackoff * time.Duration(1<<attempt)
 		if waitErr := driveInspectWait(ctx, backoff); waitErr != nil {
-			return nil, waitErr
+			return waitErr
 		}
 	}
-	return nil, lastErr
+	return lastErr
 }
 
 func driveInspectShouldRetry(err error) bool {
@@ -259,7 +244,10 @@ func driveInspectWait(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func driveInspectAnnotateError(stage string, err error) error {
+// annotateDriveError wraps a drive pipeline failure (wiki unwrap, metadata
+// query) with a stage label + hint. Shared by drive +inspect and drive +fetch so
+// wiki-unwrap errors read consistently across both commands.
+func annotateDriveError(stage string, err error) error {
 	problem, ok := errs.ProblemOf(err)
 	if !ok || problem == nil {
 		return err

@@ -1,7 +1,7 @@
 ---
 name: lark-drive
 version: 1.0.0
-description: "飞书云空间（云盘/云存储）：管理 Drive 文件和文件夹，包含上传/下载、创建文件夹、复制/移动/删除、查看元数据、评论/权限/订阅、标题、版本和本地文件导入。用户需要整理云盘目录、处理云空间资源 URL/token，或导入 Word/Markdown/Excel/CSV/PPTX/.base 为 docx/sheet/bitable/slides 时使用；doubao.com 云空间 URL/token 也按资源路径和 token 路由，不回退 WebFetch。不负责：文档内容编辑（走 lark-doc）、表格/Base 表内数据操作（走 lark-sheets/lark-base）、知识空间节点/成员管理（走 lark-wiki）、原生 Markdown 文件读写/patch/diff（走 lark-markdown）。"
+description: "飞书云空间（云盘/云存储）：管理 Drive 文件和文件夹，包含上传/下载、创建文件夹、复制/移动/删除、查看元数据、评论/权限/订阅、标题、版本、本地文件导入，以及把任意云文档/表格/多维表/幻灯片/文件/妙记读成可读 markdown（drive +fetch，自动识别类型、解包 wiki）。用户需要整理云盘目录、处理云空间资源 URL/token、把云文档/表格/妙记读成 markdown 或总结，或导入 Word/Markdown/Excel/CSV/PPTX/.base 为 docx/sheet/bitable/slides 时使用；doubao.com 云空间 URL/token 也按资源路径和 token 路由，不回退 WebFetch。不负责：文档内容编辑（走 lark-doc）、表格/Base 表内数据操作（走 lark-sheets/lark-base）、知识空间节点/成员管理（走 lark-wiki）、原生 Markdown 文件读写/patch/diff（走 lark-markdown）。"
 metadata:
   requires:
     bins: ["lark-cli"]
@@ -28,7 +28,7 @@ metadata:
 - 用户要在 Drive 里上传、创建、读取、局部 patch 或覆盖更新**原生 `.md` 文件**（不是导入成 docx），切到 [`lark-markdown`](../lark-markdown/SKILL.md)。
 - 用户要比较原生 `.md` 文件的**历史版本差异**，或比较远端 Markdown 与本地草稿，切到 [`lark-markdown`](../lark-markdown/SKILL.md) 的 `lark-cli markdown +diff`；需要版本号时先用 `drive +version-history`。
 - 用户要查看、下载、回滚或删除文件的**历史版本**，使用 `drive +version-history`、`drive +version-get`、`drive +version-revert`、`drive +version-delete`；这组命令同时支持 `--as user` 和 `--as bot`，自动化场景优先 `--as bot`。
-- 要**读普通文件的内容**（PDF / Word / Excel / 附件等；用于预览 / 总结 / 喂模型），切到 [`lark-drive-fetch.md`](references/lark-drive-fetch.md) 决定怎么取（读内容 `drive +fetch` / 取原始字节 `drive +download`）。wiki 链接需先用 `drive +inspect` 解包到 file token 再 `drive +fetch`（`+fetch` 只认 `/file/<token>`，不解 wiki）。在线文档（docx / sheet / bitable）内容走 `docs +fetch --api-version v2`。
+- 要**把任一云文档 / 表格 / 多维表 / 幻灯片 / 文件 / 妙记读成可读 markdown**（用于阅读 / 总结 / 喂模型），用 `drive +fetch`：传 URL 或 `--token --type`，自动识别类型并解包 wiki，一次返回 markdown 快照；细节见 [`lark-drive-fetch.md`](references/lark-drive-fetch.md)。要 doc 精读（`--scope` / `--detail` / 局部读取）用 `docs +fetch --api-version v2`；要原始文件字节用 `drive +download`。
 - 用户要把本地 `.xlsx` / `.xls` / `.csv` 导入成电子表格，使用 `lark-cli drive +import --type sheet`。
 - 用户要在云空间（云盘/云存储）里新建文件夹，优先使用 `lark-cli drive +create-folder`。
 - 用户要查看某个文件有哪些可下载预览格式，或想下载 PDF / HTML / 文本 / 图片等预览产物，使用 `lark-cli drive +preview`。
@@ -69,8 +69,8 @@ lark-cli drive +inspect --url 'https://xxx.feishu.cn/wiki/wikcnXXX'
 
 | 操作 | 需要的 Token | 说明 |
 |------|-------------|------|
-| 读取文档内容 | `file_token` / 通过 `docs +fetch --api-version v2` 自动处理 | `docs +fetch --api-version v2` 支持直接传入 URL |
-| 读取网盘文件内容（PDF/Word/Excel/附件） | `file_token` 或 `/file/` URL | 用 `drive +fetch`返回可读 markdown；要原始字节用 `drive +download` |
+| 读取任一文档/表格/多维表/幻灯片/文件/妙记内容 | URL 或 `--token --type` | `drive +fetch` 自动识别类型、解包 wiki，返回可读 markdown；doc 精读用 `docs +fetch --api-version v2` |
+| 取原始文件字节 / 存到本地 | `file_token` 或 `/file/` URL | `drive +download` |
 | 添加局部评论（划词评论） | `file_token` | 传 `--block-id` 时，`drive +add-comment` 会创建局部评论；`docx` 支持文本定位或 block_id，`sheet` 使用 `<sheetId>!<cell>`，`slides` 使用 `<slide-block-type>!<xml-id>`，且都支持最终解析到对应类型的 wiki URL；Drive file 不支持局部评论 |
 | 添加全文评论 | `file_token` | 不传 `--block-id` 时，`drive +add-comment` 默认创建全文评论；支持 `docx`、旧版 `doc` URL、白名单扩展名的 Drive file，以及最终解析为 `doc`/`docx`/`file` 的 wiki URL |
 | 下载文件 | `file_token` | 从文件 URL 中直接提取 |
@@ -116,7 +116,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli drive +<verb> [flags]`）
 | [`+upload`](references/lark-drive-upload.md) | 上传本地文件到 Drive 文件夹或 wiki 节点。 |
 | [`+create-folder`](references/lark-drive-create-folder.md) | 新建 Drive 文件夹，支持父文件夹与 bot 创建后自动授权。 |
 | [`+download`](references/lark-drive-download.md) | 下载 Drive 文件到本地。 |
-| [`+fetch`](references/lark-drive-fetch.md) | 读取 Drive 文件内容为可读 markdown；读内容用 `+fetch`，取原始字节用 `+download`。 |
+| [`+fetch`](references/lark-drive-fetch.md) | 统一读取入口：任一 doc/sheet/base/slides/file/minutes/wiki URL（或 `--token --type`）→ 可读 markdown 快照（自动识别类型、解包 wiki）；doc 精读用 `docs +fetch`，取原始字节用 `+download`。 |
 | [`+preview`](references/lark-drive-preview.md) | 查看或下载文件的 PDF / HTML / 文本 / 图片等预览产物。 |
 | [`+cover`](references/lark-drive-cover.md) | 查看或下载文件封面图规格。 |
 | [`+status`](references/lark-drive-status.md) | 比较本地目录与 Drive 文件夹差异；默认按 SHA-256 精确比较，`--quick` 使用修改时间近似比较。 |

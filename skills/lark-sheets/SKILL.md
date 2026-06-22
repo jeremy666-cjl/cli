@@ -46,7 +46,7 @@ metadata:
 | 查找并替换 | `+cells-replace` | — |
 | 看子表结构（合并 / 行高列宽 / 冻结 / 隐藏） | `+sheet-info` | `+sheet-get`、`+structure-get`、`+sheet-structure-get` |
 | 看工作簿 / 子表清单 | `+workbook-info` | — |
-| 把整张表（尤其多子表）读成内容 / 总结 / 翻译 / 问答 / 喂模型 | [`+fetch`](references/lark-sheets-fetch.md)：一次返回全工作簿的可读 markdown（服务端渲染人名 / 日期 / GFM 表；默认每子表 50 行，`--embed-max-rows` 调大 / 设 0）。要精确计数 / 筛选 / 去重 / 分组、取裸值或某区间仍走 `+workbook-info` → `+cells-get` | — |
+| 把整张表（尤其多子表）读成内容 / 总结 / 翻译 / 问答 / 喂模型 | [`drive +fetch`](../lark-drive/references/lark-drive-fetch.md)：一次返回全工作簿的可读 markdown（服务端渲染人名 / 日期 / GFM 表；默认每子表 50 行，`--embed-max-rows` 调大 / 设 0）。要精确计数 / 筛选 / 去重 / 分组、取裸值或某区间仍走 `+workbook-info` → `+cells-get` | — |
 | 导出 xlsx / 单表 csv | `+workbook-export` | — |
 | 清除内容 / 格式 | `+cells-clear`（范围维度用 `--scope`，取值 content / formats / all） | `--type` |
 | 批量清除多区域 | `+cells-batch-clear`（`--scope`） | `--target` |

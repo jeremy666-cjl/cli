@@ -48,7 +48,7 @@ func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (
 	}
 
 	md := eqafetch.RenderImages(resp.FullContent, resp.QAImageMetaMap, eqafetch.ParseImageMode(runtime.Str("image-urls")))
-	md = eqafetch.TruncateGFMTables(md, runtime.Int("embed-max-rows"))
+	md = eqafetch.TruncateGFMTables(md, runtime.Int("embed-max-rows"), "")
 
 	emitInlineEmbeds(runtime, resp, md)
 	return true, nil
