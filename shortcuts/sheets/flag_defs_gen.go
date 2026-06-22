@@ -473,16 +473,6 @@ var flagDefs = map[string]commandDef{
 			{Name: "dry-run", Kind: "system", Type: "bool", Required: "optional"},
 		},
 	},
-	"+fetch": {
-		Risk: "read",
-		Flags: []flagDef{
-			{Name: "url", Kind: "public", Type: "string", Required: "xor", Desc: "Spreadsheet URL (preserves `?sheet=` for the active sub-table; XOR with `--spreadsheet-token`)"},
-			{Name: "spreadsheet-token", Kind: "public", Type: "string", Required: "xor", Desc: "Spreadsheet token (XOR with `--url`)"},
-			{Name: "embed-max-rows", Kind: "own", Type: "int", Required: "optional", Desc: "Cap each rendered table to N data rows (0 = no limit)", Default: "50"},
-			{Name: "image-urls", Kind: "own", Type: "string", Required: "optional", Desc: "Image rendering: none (caption only) | one (single URL + WxH) | full (all routes)", Default: "one", Enum: []string{"none", "one", "full"}},
-			{Name: "dry-run", Kind: "system", Type: "bool", Required: "optional", Desc: "Print the request path and parameters without executing"},
-		},
-	},
 	"+filter-create": {
 		Risk: "write",
 		Flags: []flagDef{

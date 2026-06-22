@@ -159,7 +159,7 @@ Meeting (视频会议)
     └── Keywords (推荐关键词)
 ```
 
-> **妙记边界**：只想**读 / 总结一篇妙记的内容**（一串可读 markdown：总结 + 章节 + 待办）→ [`minutes +fetch`](../lark-minutes/SKILL.md)；要**结构化纪要字段 / AI 产物，或把逐字稿·纪要落盘成文件** → `+notes --minute-tokens`；妙记基础信息（标题 / 时长 / 封面）看 [`+recording`](references/lark-vc-recording.md) 与 [lark-minutes](../lark-minutes/SKILL.md)。
+> **妙记边界**：只想**读 / 总结一篇妙记的内容**（一串可读 markdown：总结 + 章节 + 待办）→ [`drive +fetch`](../lark-drive/references/lark-drive-fetch.md)；要**结构化纪要字段 / AI 产物，或把逐字稿·纪要落盘成文件** → `+notes --minute-tokens`；妙记基础信息（标题 / 时长 / 封面）看 [`+recording`](references/lark-vc-recording.md) 与 [lark-minutes](../lark-minutes/SKILL.md)。
 >
 > **Note 域边界**：`vc +notes` 是从**会议线索**（`meeting_id` / `calendar_event_id` / `minute_token`）定位纪要的入口，返回 `note_id` 和 `note_display_type`。
 > - 已有 `note_id` → [lark-note](../lark-note/SKILL.md)。

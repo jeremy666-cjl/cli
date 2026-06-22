@@ -14,7 +14,6 @@ func TestShortcutsIncludesExpectedCommands(t *testing.T) {
 		"+create",
 		"+media-upload",
 		"+replace-slide",
-		"+fetch",
 	}
 
 	if len(got) != len(want) {

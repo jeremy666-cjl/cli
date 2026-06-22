@@ -36,6 +36,7 @@ lark-cli docs +update --api-version v2 --doc "文档URL或token" --command appen
 > - **精准编辑场景**（`docs +update` 的 `str_replace` / `block_insert_after` / `block_replace` / `block_delete` / `block_move_after` 等局部精修指令）：优先使用 XML（`--doc-format xml`，即默认值）。XML 能稳定表达 block 结构和样式，局部精修更可控；不要因为 Markdown 更简单就自行切换。
 
 ## 快速决策
+- 要把**任意**云文档 / 表格 / 多维表 / 幻灯片 / 文件 / 妙记**整篇读成 markdown 快照**（不限于 doc，或不需要精读）→ 用 [`drive +fetch`](../lark-drive/references/lark-drive-fetch.md)（统一入口，自动识别类型、解包 wiki）；doc 精读 / 局部读取 / 编辑准备仍用本 skill 的 `docs +fetch --api-version v2`。
 - 用户需要“某个 block 的直达链接 / 锚点链接”时：返回 `文档基础 URL#block_id`。如果当前只有文档 URL 没有 block_id，先用 `docs +fetch --detail with-ids` 拿到目标 block 的 id
 - 例：
   - 已知文档 URL = `https://xxx.feishu.cn/docx/doxcn123`

@@ -1,9 +1,9 @@
 # Drive CLI E2E Coverage
 
 ## Metrics
-- Denominator: 31 leaf commands
-- Covered: 10
-- Coverage: 32.3%
+- Denominator: 32 leaf commands
+- Covered: 11
+- Coverage: 34.4%
 
 ## Summary
 - TestDrive_FilesCreateFolderWorkflow: proves `drive files create_folder` in `create_folder as bot`; helper asserts the returned folder token and registers best-effort cleanup via `drive files delete`.
@@ -20,6 +20,7 @@
 - Cleanup note: `drive files delete` is only exercised in cleanup and is intentionally left uncovered.
 - Blocked area: live export, permission, subscription, reply, and file comment API flows still need deterministic remote fixtures and filesystem setup.
 - Dry-run note: `drive_upload_dryrun_test.go::TestDriveUploadDryRun_WikiTarget` and `TestDriveUploadDryRun_WithFileToken` cover the wiki-target and overwrite request shapes for `drive +upload`; live upload/status/duplicate workflows also use real `+upload` against the backend.
+- TestDriveFetchDryRun_* / TestDriveFetchValidation_* (drive +fetch): dry-run coverage for the unified content-read dispatcher; asserts each URL type dispatches to its lane — docx (mix + native docs_ai fallback, 2-step; `--full` disables pagination, `--page-token`/`--page-size` flow into the mix body with `WithBlockID` anchors), sheet (`?sheet=` selector forwarded verbatim), bitable (`?table=` selector forwarded verbatim), slides, file, minutes (native GET, no faas; `--include transcript` forwarded), wiki (get_node + note explaining obj_type dispatch) — plus bare-token `--type` URL rebuild and validation rejections (`--full` on sheet, `--include` on docx, empty/unsupported/bare-token-no-type). Runs without hitting live APIs.
 
 ## Command Table
 
@@ -31,6 +32,7 @@
 | ✕ | drive +download | shortcut |  | none | no file fixture workflow yet |
 | ✓ | drive +export | shortcut | drive_export_dryrun_test.go::TestDriveExportDryRun_FileNameMetadata + TestDriveExportDryRun_BitableBaseOnlySchema | `--token`; `--doc-type`; `--file-extension`; `--file-name`; `--output-dir`; `--only-schema` | dry-run only; no live export workflow yet |
 | ✕ | drive +export-download | shortcut |  | none | no export-download workflow yet |
+| ✓ | drive +fetch | shortcut | drive_fetch_dryrun_test.go::TestDriveFetchDryRun_* + TestDriveFetchValidation_* | `--url` (docx/doc/sheet/base/slides/file/minutes/wiki); `--token --type`; `?sheet=`/`?table=` selector verbatim; `--full`/`--page-token`/`--page-size` (doc only); `--include` (minutes only) | dry-run only; live fetch needs eqa faas env + read-permission fixtures |
 | ✕ | drive +import | shortcut |  | none | no import workflow yet |
 | ✕ | drive +move | shortcut |  | none | no move workflow yet |
 | ✓ | drive +pull | shortcut | drive_pull_dryrun_test.go::TestDrive_PullDryRun + drive_duplicate_sync_workflow_test.go::TestDrive_DuplicateRemoteWorkflow | `--local-dir`; `--folder-token`; `--on-duplicate-remote=rename\|newest\|oldest`; `--delete-local --yes` guard | dry-run locks flag/validate shape; live workflow proves duplicate fail-fast and rename recovery |
