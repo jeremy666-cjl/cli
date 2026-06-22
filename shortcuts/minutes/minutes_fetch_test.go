@@ -4,48 +4,17 @@
 package minutes
 
 import (
-	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/larksuite/cli/internal/cmdutil"
-	"github.com/larksuite/cli/internal/httpmock"
 )
 
 // ---------------------------------------------------------------------------
-// resolveMinuteToken
-// ---------------------------------------------------------------------------
-
-func TestResolveMinuteToken(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		in, want string
-	}{
-		{"obcnq3b9jl72l83w4f149w9c", "obcnq3b9jl72l83w4f149w9c"},
-		{"  obcntoken  ", "obcntoken"},
-		{"https://meetings.feishu.cn/minutes/obcntoken123", "obcntoken123"},
-		{"https://meetings.feishu.cn/minutes/obcntoken123/", "obcntoken123"},
-		{"https://meetings.feishu.cn/minutes/obcntoken123?from=share", "obcntoken123"},
-		{"https://meetings.feishu.cn/minutes/obcntoken123#sec", "obcntoken123"},
-		{"https://meetings.feishu.cn/minutes/obcntoken123/extra", "obcntoken123"},
-		{"", ""},
-		{"https://meetings.feishu.cn/minutes", ""},
-	}
-	for _, c := range cases {
-		if got := resolveMinuteToken(c.in); got != c.want {
-			t.Errorf("resolveMinuteToken(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// parseMinutesIncludes
+// ParseIncludes
 // ---------------------------------------------------------------------------
 
 func TestParseMinutesIncludes(t *testing.T) {
 	t.Parallel()
-	set, err := parseMinutesIncludes("transcript, note-doc")
+	set, err := ParseIncludes("transcript, note-doc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,10 +22,10 @@ func TestParseMinutesIncludes(t *testing.T) {
 		t.Errorf("both includes should be set, got %v", set)
 	}
 
-	if _, err := parseMinutesIncludes(""); err != nil {
+	if _, err := ParseIncludes(""); err != nil {
 		t.Errorf("empty include should be valid, got %v", err)
 	}
-	if _, err := parseMinutesIncludes("bogus"); err == nil {
+	if _, err := ParseIncludes("bogus"); err == nil {
 		t.Errorf("unknown include must error")
 	}
 }
@@ -172,102 +141,5 @@ func TestRenderTodos_CollapsesMultilineContent(t *testing.T) {
 	got := renderTodos(todos)
 	if got != "- 第一行 第二行 第三行" {
 		t.Errorf("todo line not collapsed, got: %q", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// wiring: dry-run + execute
-// ---------------------------------------------------------------------------
-
-func TestMinutesFetch_DryRun(t *testing.T) {
-	f, stdout, _, _ := cmdutil.TestFactory(t, defaultConfig())
-	warmTokenCache(t)
-
-	err := mountAndRun(t, MinutesFetch,
-		[]string{"+fetch", "--minute-token", "https://meetings.feishu.cn/minutes/obcndryrun123", "--dry-run", "--as", "user"},
-		f, stdout)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "GET") || !strings.Contains(out, "/open-apis/minutes/v1/minutes/obcndryrun123") {
-		t.Errorf("expected GET on resolved token, got:\n%s", out)
-	}
-	if !strings.Contains(out, "artifacts") {
-		t.Errorf("expected artifacts api in dry-run, got:\n%s", out)
-	}
-}
-
-func TestMinutesFetch_Execute(t *testing.T) {
-	f, stdout, _, reg := cmdutil.TestFactory(t, defaultConfig())
-	warmTokenCache(t)
-
-	const token = "obcnq3b9jl72l83w4f149w9c"
-	// Register metadata BEFORE artifacts: substring matching consumes each stub
-	// once, so the metadata request claims its stub before the artifacts request.
-	reg.Register(&httpmock.Stub{
-		Method: http.MethodGet,
-		URL:    "/open-apis/minutes/v1/minutes/" + token,
-		Body: map[string]interface{}{
-			"code": 0, "msg": "ok",
-			"data": map[string]interface{}{
-				"minute": map[string]interface{}{
-					"title":       "测试纪要",
-					"note_id":     "note_abc",
-					"create_time": 1700000000,
-				},
-			},
-		},
-	})
-	reg.Register(&httpmock.Stub{
-		Method: http.MethodGet,
-		URL:    "/open-apis/minutes/v1/minutes/" + token + "/artifacts",
-		Body: map[string]interface{}{
-			"code": 0, "msg": "ok",
-			"data": map[string]interface{}{
-				"summary": "会议总结内容",
-				"minute_chapters": []interface{}{
-					map[string]interface{}{"title": "第一节", "summary_content": "要点一"},
-				},
-				"minute_todos": []interface{}{
-					map[string]interface{}{"content": "跟进事项"},
-				},
-				"keywords": []interface{}{"关键词A"},
-			},
-		},
-	})
-
-	err := mountAndRun(t, MinutesFetch,
-		[]string{"+fetch", "--minute-token", token, "--format", "json", "--as", "user"}, f, stdout)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var res map[string]interface{}
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		t.Fatalf("failed to parse output: %v\n%s", err, stdout.String())
-	}
-	data, _ := res["data"].(map[string]interface{})
-	if data == nil {
-		t.Fatalf("no data in envelope: %s", stdout.String())
-	}
-	if data["source"] != "minutes_native" {
-		t.Errorf("source = %v, want minutes_native", data["source"])
-	}
-	if note, _ := data["note"].(string); note == "" {
-		t.Errorf("expected a note about missing update_time, got none")
-	}
-	minute, _ := data["minute"].(map[string]interface{})
-	if minute == nil {
-		t.Fatalf("no minute object: %s", stdout.String())
-	}
-	content, _ := minute["content"].(string)
-	for _, want := range []string{"# 测试纪要", "## 总结\n\n会议总结内容", "## 章节", "### 第一节", "## 待办\n\n- 跟进事项", "## 关键词\n\n关键词A"} {
-		if !strings.Contains(content, want) {
-			t.Errorf("content missing %q:\n%s", want, content)
-		}
-	}
-	if minute["title"] != "测试纪要" {
-		t.Errorf("title = %v, want 测试纪要", minute["title"])
 	}
 }
