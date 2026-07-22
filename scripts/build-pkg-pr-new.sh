@@ -26,13 +26,20 @@ build_target() {
 
   local output="$OUT_DIR/bin/lark-cli-${goos}-${goarch}${ext}"
   echo "Building ${goos}/${goarch} -> ${output}"
-  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" -o "$output" ./main.go
+  # Build the whole main package (.) instead of just ./main.go, so
+  # skills_embed.go's //go:embed is compiled in and `skills read` works in
+  # this preview binary. A single-file `./main.go` build compiles only
+  # main.go, so the embed init() never runs and every `lark-cli skills read`
+  # fails with "skill content not embedded in this build". Cost: ~3.3 MB
+  # larger per platform (skills content is identical across platforms).
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" -o "$output" .
 }
 
 build_target darwin arm64
 build_target linux amd64
 build_target darwin amd64
 build_target linux arm64
+build_target linux riscv64
 build_target windows amd64
 build_target windows arm64
 
@@ -55,6 +62,7 @@ const platformMap = {
 const archMap = {
   x64: "amd64",
   arm64: "arm64",
+  riscv64: "riscv64",
 };
 
 const platform = platformMap[process.platform];

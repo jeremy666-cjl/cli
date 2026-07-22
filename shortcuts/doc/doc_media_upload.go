@@ -9,8 +9,8 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/extension/fileio"
-	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
@@ -84,10 +84,10 @@ var DocMediaUpload = common.Shortcut{
 		// Validate file
 		stat, err := runtime.FileIO().Stat(filePath)
 		if err != nil {
-			return common.WrapInputStatError(err, "file not found")
+			return wrapDocInputFileErr(err, "file not found")
 		}
 		if !stat.Mode().IsRegular() {
-			return output.ErrValidation("file must be a regular file: %s", filePath)
+			return errs.NewValidationError(errs.SubtypeInvalidArgument, "file must be a regular file: %s", filePath).WithParam("--file")
 		}
 
 		fileName := filepath.Base(filePath)
@@ -153,7 +153,7 @@ func uploadDocMediaFile(runtime *common.RuntimeContext, cfg UploadDocMediaFileCo
 	// Doc media uploads share the generic Drive media transport. The doc-specific
 	// routing only shows up in parent_type/parent_node and optional route extra.
 	if cfg.FileSize <= common.MaxDriveMediaUploadSinglePartSize {
-		return common.UploadDriveMediaAll(runtime, common.DriveMediaUploadAllConfig{
+		return common.UploadDriveMediaAllTyped(runtime, common.DriveMediaUploadAllConfig{
 			FilePath:   cfg.FilePath,
 			Reader:     cfg.Reader,
 			FileName:   cfg.FileName,
@@ -163,7 +163,7 @@ func uploadDocMediaFile(runtime *common.RuntimeContext, cfg UploadDocMediaFileCo
 			Extra:      extra,
 		})
 	}
-	return common.UploadDriveMediaMultipart(runtime, common.DriveMediaMultipartUploadConfig{
+	return common.UploadDriveMediaMultipartTyped(runtime, common.DriveMediaMultipartUploadConfig{
 		FilePath:   cfg.FilePath,
 		Reader:     cfg.Reader,
 		FileName:   cfg.FileName,

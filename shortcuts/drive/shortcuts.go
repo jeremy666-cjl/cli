@@ -14,6 +14,7 @@ func Shortcuts() []common.Shortcut {
 		DriveDownload,
 		DrivePreview,
 		DriveCover,
+		DriveFetch,
 		DriveAddComment,
 		DriveExport,
 		DriveExportDownload,

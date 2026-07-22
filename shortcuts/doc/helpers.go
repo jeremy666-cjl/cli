@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/larksuite/cli/internal/output"
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
@@ -24,7 +24,7 @@ type documentRef struct {
 func parseDocumentRef(input string) (documentRef, error) {
 	raw := strings.TrimSpace(input)
 	if raw == "" {
-		return documentRef{}, output.ErrValidation("--doc cannot be empty")
+		return documentRef{}, errs.NewValidationError(errs.SubtypeInvalidArgument, "--doc cannot be empty").WithParam("--doc")
 	}
 
 	if token, ok := extractDocumentToken(raw, "/wiki/"); ok {
@@ -37,13 +37,28 @@ func parseDocumentRef(input string) (documentRef, error) {
 		return documentRef{Kind: "doc", Token: token}, nil
 	}
 	if strings.Contains(raw, "://") {
-		return documentRef{}, output.ErrValidation("unsupported --doc input %q: use a docx URL/token or a wiki URL that resolves to docx", raw)
+		return documentRef{}, errs.NewValidationError(errs.SubtypeInvalidArgument, "unsupported --doc input %q: use a docx URL/token or a wiki URL that resolves to docx", raw).WithParam("--doc")
 	}
 	if strings.ContainsAny(raw, "/?#") {
-		return documentRef{}, output.ErrValidation("unsupported --doc input %q: use a docx token or a wiki URL", raw)
+		return documentRef{}, errs.NewValidationError(errs.SubtypeInvalidArgument, "unsupported --doc input %q: use a docx token or a wiki URL", raw).WithParam("--doc")
 	}
 
 	return documentRef{Kind: "docx", Token: raw}, nil
+}
+
+// docEqaResolvedURL returns the URL to forward to the eqa fetch lane for --doc
+// on the Execute path. eqa is URL-addressed; a bare token is resolved via a wiki
+// probe (a wiki node_token → /wiki/<node_token>, else a typed /docx/ URL), and a
+// real URL (docx / wiki) is forwarded verbatim. See common.ResolveFetchURL.
+func docEqaResolvedURL(runtime *common.RuntimeContext) string {
+	return common.ResolveFetchURL(runtime, "docx", strings.TrimSpace(runtime.Str("doc")))
+}
+
+// docEqaTypedURL is the dry-run counterpart: it builds the typed /docx/ URL for a
+// bare token without the wiki probe (dry-run makes no API calls). The real run
+// may rewrite a wiki-node token to /wiki/<node_token>. See ResourceURLOrBuild.
+func docEqaTypedURL(runtime *common.RuntimeContext) string {
+	return common.ResourceURLOrBuild(runtime.Brand(), "docx", strings.TrimSpace(runtime.Str("doc")))
 }
 
 func extractDocumentToken(raw, marker string) (string, bool) {
@@ -64,10 +79,10 @@ func extractDocumentToken(raw, marker string) (string, bool) {
 
 // doDocAPI executes an OpenAPI request against the docs_ai endpoints and returns
 // the parsed "data" field from the standard Lark response envelope {code, msg, data}.
-// Uses the log-id-aware variant so the x-tt-logid header is surfaced in both the
-// success payload and error details — doc v2 callers rely on it for support escalations.
+// CallAPITyped lifts the x-tt-logid response header onto the typed error so log_id
+// surfaces for support escalations even when the body omits it.
 func doDocAPI(runtime *common.RuntimeContext, method, apiPath string, body interface{}) (map[string]interface{}, error) {
-	return runtime.DoAPIJSONWithLogID(method, apiPath, nil, body)
+	return runtime.CallAPITyped(method, apiPath, nil, body)
 }
 
 func docsSceneFromContext(ctx context.Context) string {
@@ -87,7 +102,26 @@ func injectDocsScene(runtime *common.RuntimeContext, body map[string]interface{}
 func buildDriveRouteExtra(docID string) (string, error) {
 	extra, err := json.Marshal(map[string]string{"drive_route_token": docID})
 	if err != nil {
-		return "", output.Errorf(output.ExitInternal, "internal_error", "failed to marshal upload extra data: %v", err)
+		return "", errs.NewInternalError(errs.SubtypeUnknown, "failed to marshal upload extra data: %v", err).WithCause(err)
 	}
 	return string(extra), nil
+}
+
+func appendDocWarning(data map[string]interface{}, warning string) {
+	if data == nil {
+		return
+	}
+	if strings.TrimSpace(warning) == "" {
+		return
+	}
+	switch existing := data["warnings"].(type) {
+	case []interface{}:
+		data["warnings"] = append(existing, warning)
+	case []string:
+		data["warnings"] = append(existing, warning)
+	case nil:
+		data["warnings"] = []string{warning}
+	default:
+		data["warnings"] = []interface{}{existing, warning}
+	}
 }
