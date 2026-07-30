@@ -686,7 +686,10 @@ func TestDocsFetchIMMarkdownIgnoresHTML5BlockInsideCodeFence(t *testing.T) {
 func TestDocsFetchMarkdownDetailDowngradesToSimple(t *testing.T) {
 	t.Parallel()
 
-	for _, format := range []string{"markdown", "im-markdown"} {
+	// markdown whole-doc now routes through the knowledge-qa fetch lane (mix);
+	// detail downgrade is a native docs_ai behavior, so cover it via im-markdown
+	// (which stays on the native path).
+	for _, format := range []string{"im-markdown"} {
 		for _, detail := range []string{"with-ids", "full"} {
 			t.Run(format+"/"+detail, func(t *testing.T) {
 				t.Parallel()
@@ -741,7 +744,7 @@ func TestDocsFetchMarkdownDetailDowngradeWarnsInOutput(t *testing.T) {
 	err := mountAndRunDocs(t, DocsFetch, []string{
 		"+fetch",
 		"--doc", "doxcnFetchWarning",
-		"--doc-format", "markdown",
+		"--doc-format", "im-markdown",
 		"--detail", "with-ids",
 		"--as", "bot",
 	}, f, stdout)
@@ -758,7 +761,7 @@ func TestDocsFetchMarkdownDetailDowngradeWarnsInOutput(t *testing.T) {
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %#v, want one downgrade warning", data["warnings"])
 	}
-	if got, _ := warnings[0].(string); !strings.Contains(got, "returning markdown output") || !strings.Contains(got, "ignoring the unsupported detail option") {
+	if got, _ := warnings[0].(string); !strings.Contains(got, "returning im-markdown output") || !strings.Contains(got, "ignoring the unsupported detail option") {
 		t.Fatalf("unexpected warning: %q", got)
 	}
 }
@@ -786,7 +789,7 @@ func TestDocsFetchMarkdownDetailDowngradeWarnsInPrettyOutput(t *testing.T) {
 	err := mountAndRunDocs(t, DocsFetch, []string{
 		"+fetch",
 		"--doc", "doxcnFetchPrettyWarning",
-		"--doc-format", "markdown",
+		"--doc-format", "im-markdown",
 		"--detail", "full",
 		"--format", "pretty",
 		"--as", "bot",
@@ -799,7 +802,7 @@ func TestDocsFetchMarkdownDetailDowngradeWarnsInPrettyOutput(t *testing.T) {
 		t.Fatalf("stdout = %q, want markdown content only", got)
 	}
 	if got := stderr.String(); !strings.Contains(got, "warning: --detail full is only supported with --doc-format xml") ||
-		!strings.Contains(got, "returning markdown output") ||
+		!strings.Contains(got, "returning im-markdown output") ||
 		!strings.Contains(got, "ignoring the unsupported detail option") {
 		t.Fatalf("stderr missing downgrade warning: %q", got)
 	}
@@ -1018,6 +1021,11 @@ func newFetchShortcutTestRuntime(t *testing.T, apiVersion string, setFlags map[s
 	cmd.Flags().Int("max-depth", fetchDefaultInt("max-depth"), "")
 	cmd.Flags().String("offset", "", "")
 	cmd.Flags().String("limit", "", "")
+	// knowledge-qa enhancement flags (mix / inline-embeds lane).
+	cmd.Flags().Bool("inline-embeds", false, "")
+	cmd.Flags().Bool("full", false, "")
+	cmd.Flags().String("page-token", "", "")
+	cmd.Flags().Int("page-size", 0, "")
 	if apiVersion != "" {
 		if err := cmd.Flags().Set("api-version", apiVersion); err != nil {
 			t.Fatalf("set api-version: %v", err)
@@ -1039,6 +1047,56 @@ func newCreateBodyTestRuntime(ctx context.Context) *common.RuntimeContext {
 	cmd.Flags().String("parent-token", "", "")
 	cmd.Flags().String("parent-position", "", "")
 	return common.TestNewRuntimeContextWithCtx(ctx, cmd, nil)
+}
+
+// TestFetchLaneRevisionAndLangForceNative guards the "silent wrong revision"
+// contract: a markdown whole-doc read normally routes through the knowledge-qa
+// mix lane, but that lane has no field for a historical revision or a cite
+// language, so it must fall back to native docs_ai instead of silently
+// returning the latest revision / default language.
+func TestFetchLaneRevisionAndLangForceNative(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		flags        map[string]string
+		useFetchLane bool
+	}{
+		{"markdown full routes to fetch lane", map[string]string{"doc-format": "markdown"}, true}, // scope defaults to full
+		{"historical revision forces native", map[string]string{"doc-format": "markdown", "revision-id": "42"}, false},
+		{"explicit lang forces native", map[string]string{"doc-format": "markdown", "lang": "ja-JP"}, false},
+		{"xml stays native", map[string]string{"doc-format": "xml"}, false},
+		{"partial scope stays native", map[string]string{"doc-format": "markdown", "scope": "outline"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := newFetchShortcutTestRuntime(t, "", tc.flags)
+			useFetchLane, _ := fetchLaneMode(rt)
+			if useFetchLane != tc.useFetchLane {
+				t.Fatalf("fetchLaneMode useFetchLane=%v, want %v (flags=%v)", useFetchLane, tc.useFetchLane, tc.flags)
+			}
+		})
+	}
+}
+
+// TestValidateFetchLaneFlagsRevisionConflict checks a mix-only flag (--full)
+// together with a historical --revision-id yields a conflict error that blames
+// revision-id, not the generic "only apply to markdown full" message (revision
+// forces native, so --full has no lane to attach to).
+func TestValidateFetchLaneFlagsRevisionConflict(t *testing.T) {
+	t.Parallel()
+	rt := newFetchShortcutTestRuntime(t, "", map[string]string{
+		"doc-format":  "markdown",
+		"revision-id": "42",
+		"full":        "true",
+	})
+	err := validateFetchLaneFlags(rt)
+	if err == nil {
+		t.Fatal("expected conflict error for --full + historical --revision-id")
+	}
+	if !strings.Contains(err.Error(), "revision-id") {
+		t.Fatalf("error should blame --revision-id, got: %v", err)
+	}
 }
 
 func newUpdateBodyTestRuntime(ctx context.Context) *common.RuntimeContext {

@@ -135,3 +135,61 @@ func ParseResourceURL(rawURL string) (ResourceRef, bool) {
 
 	return ResourceRef{}, false
 }
+
+// ResourceURLOrBuild normalizes a "URL or bare token" input into a URL suitable
+// for a URL-addressed backend (the knowledge-qa fetch lane, which only accepts a
+// URL, not a bare token). When input already looks like a URL (contains "://") it
+// is returned unchanged so query params (?sheet=/?table=) and wiki paths survive;
+// otherwise it is treated as a bare token of the given kind and expanded via
+// BuildResourceURL. An unknown kind (BuildResourceURL returns "") falls back to
+// the original input so the backend surfaces a clear error rather than the cli
+// silently guessing. The native token-addressed OpenAPI lanes use the token
+// directly and do not need this.
+func ResourceURLOrBuild(brand core.LarkBrand, kind, input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.Contains(input, "://") {
+		return input
+	}
+	if built := BuildResourceURL(brand, kind, input); built != "" {
+		return built
+	}
+	return input
+}
+
+// ResolveFetchURL turns a "URL or bare token" into a URL the knowledge-qa fetch
+// lane (URL-addressed) can read, disambiguating a bare token's true nature via a
+// wiki probe. A real URL (contains "://") or empty input is returned unchanged. A
+// bare token is probed against wiki get_node via ResolveWikiNode (the same unwrap
+// drive +fetch uses): if it resolves to a wiki node it becomes
+// /wiki/<node_token> (origin_node_token for shortcuts) so the fetch service
+// resolves the node → underlying doc; any failure (missing scope, not a node,
+// incomplete node data) degrades to a typed URL from declaredKind via
+// ResourceURLOrBuild, so a URL is always returned.
+//
+// This calls the wiki API, so use it only on the Execute path; dry-run builds the
+// typed URL with ResourceURLOrBuild instead (no probe).
+func ResolveFetchURL(runtime *RuntimeContext, declaredKind, input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.Contains(input, "://") {
+		return input
+	}
+	if node, err := ResolveWikiNode(runtime, input); err == nil {
+		if u := wikiNodeURL(runtime.Config.Brand, node); u != "" {
+			return u
+		}
+	}
+	return ResourceURLOrBuild(runtime.Config.Brand, declaredKind, input)
+}
+
+// wikiNodeURL builds the /wiki/<token> URL a resolved wiki node reads as:
+// node_token, except for a shortcut node (node_type=shortcut) where it follows
+// origin_node_token to the real node so the fetch reads the original doc, not the
+// shortcut. Returns "" when node_token is absent (BuildResourceURL returns "" for
+// an empty token).
+func wikiNodeURL(brand core.LarkBrand, node *WikiNode) string {
+	nodeToken := node.NodeToken
+	if strings.EqualFold(node.NodeType, "shortcut") && node.OriginNodeToken != "" {
+		nodeToken = node.OriginNodeToken
+	}
+	return BuildResourceURL(brand, "wiki", nodeToken)
+}

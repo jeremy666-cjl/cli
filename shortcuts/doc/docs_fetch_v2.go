@@ -30,6 +30,12 @@ func v2FetchFlags() []common.Flag {
 		{Name: "context-before", Desc: "range/keyword/section context: sibling blocks before selected top-level blocks", Type: "int", Default: "0"},
 		{Name: "context-after", Desc: "range/keyword/section context: sibling blocks after selected top-level blocks", Type: "int", Default: "0"},
 		{Name: "max-depth", Desc: "outline heading level cap; other scopes subtree depth where -1 is unlimited and 0 is block only", Type: "int", Default: "-1"},
+		// knowledge-qa fetch enhancement (markdown whole-doc only)
+		{Name: "inline-embeds", Type: "bool", Default: "false", Desc: "markdown whole-doc only: expand embedded bitable/sheet tables to GFM via the knowledge-qa fetch lane"},
+		{Name: "full", Type: "bool", Default: "false", Desc: "markdown whole-doc only: return the whole document in one response (disable auto-pagination)"},
+		{Name: "page-token", Desc: "markdown whole-doc only: continue a paginated read from a prior next_page_token"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "markdown whole-doc only: per-page token budget hint (0 = server default)"},
+		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "markdown only: cap each rendered table to N data rows (0 = no limit)"},
 	}
 }
 
@@ -46,10 +52,52 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if err := validateReadModeFlags(runtime); err != nil {
 		return err
 	}
+	return validateFetchLaneFlags(runtime)
+}
+
+// fetchLaneMode reports whether the whole-doc markdown read should go through the
+// knowledge-qa fetch lane (mix, or inline-embeds when --inline-embeds is set)
+// instead of the native docs_ai OpenAPI. Only markdown + scope=full (whole doc)
+// qualifies; xml, partial scopes (range/keyword/section/outline), and im-markdown
+// stay native. Returns (useFetchLane, inline).
+func fetchLaneMode(runtime *common.RuntimeContext) (useFetchLane, inline bool) {
+	if runtime.Str("doc-format") != "markdown" || effectiveFetchReadMode(runtime) != "full" {
+		return false, false
+	}
+	// The knowledge-qa fetch lane has no field for a historical revision or a
+	// cite language, so it would silently return the latest revision / default
+	// language. Route to the native docs_ai path (which honors both) when either
+	// is explicitly requested, instead of silently dropping the user's intent.
+	if runtime.Int("revision-id") > 0 || runtime.Changed("lang") {
+		return false, false
+	}
+	return true, runtime.Bool("inline-embeds")
+}
+
+// validateFetchLaneFlags checks the knowledge-qa enhancement flags apply only to
+// the markdown whole-doc path (mix / inline-embeds).
+func validateFetchLaneFlags(runtime *common.RuntimeContext) error {
+	if runtime.Bool("full") && (strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0) {
+		return common.ValidationErrorf("--full cannot be combined with --page-token/--page-size").WithParam("--full")
+	}
+	useFetchLane, _ := fetchLaneMode(runtime)
+	pagination := runtime.Bool("full") || strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0
+	if (pagination || runtime.Bool("inline-embeds")) && !useFetchLane {
+		// markdown + full would otherwise enable the fetch lane; if it is off here,
+		// a historical revision or an explicit --lang forced the native path, so
+		// the mix-only flags conflict with those (not with format/scope).
+		if runtime.Str("doc-format") == "markdown" && effectiveFetchReadMode(runtime) == "full" {
+			return common.ValidationErrorf("--inline-embeds/--full/--page-token/--page-size are not supported together with a historical --revision-id (or an explicit --lang), which use the native docs_ai path").WithParam("--inline-embeds")
+		}
+		return common.ValidationErrorf("--inline-embeds/--full/--page-token/--page-size only apply to --doc-format markdown with --scope full").WithParam("--inline-embeds")
+	}
 	return nil
 }
 
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
+	if useFetchLane, inline := fetchLaneMode(runtime); useFetchLane {
+		return dryRunFetchLane(runtime, !inline) // anchored (mix) when not inline-embeds
+	}
 	// Validate has already accepted --doc; parseDocumentRef cannot fail here.
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 	body := buildFetchBody(runtime)
@@ -61,7 +109,21 @@ func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.Dr
 		Set("document_id", ref.Token)
 }
 
-func executeFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
+func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
+	// knowledge-qa fetch enhancement: a whole-doc markdown read (mix, or
+	// inline-embeds when --inline-embeds is set) goes through the fetch lane
+	// before the native docs_ai path. handled=false on a fetch failure falls
+	// through to native ("只增不减": the worst case equals native markdown).
+	if useFetchLane, inline := fetchLaneMode(runtime); useFetchLane {
+		run := runMixFetch
+		if inline {
+			run = runInlineEmbedsFetch
+		}
+		if handled, err := run(ctx, runtime); handled || err != nil {
+			return err
+		}
+	}
+
 	ref, _ := parseDocumentRef(runtime.Str("doc"))
 
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", ref.Token)
