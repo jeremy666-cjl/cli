@@ -26,8 +26,8 @@ import (
 //   - minutes → native minutes OpenAPI (summary + chapters + todos + keywords,
 //     with opt-in transcript/note-doc)
 //
-// docs +fetch stays the doc specialist (--scope/--detail/--inline-embeds); this
-// command is the quick "give me the content" path for any entity type.
+// docs +fetch stays the doc specialist (--scope/--detail); this command is the
+// quick "give me the content" path for any entity type.
 var DriveFetch = common.Shortcut{
 	Service:     "drive",
 	Command:     "+fetch",
@@ -54,9 +54,9 @@ var DriveFetch = common.Shortcut{
 		{Name: "token", Desc: "bare resource token (requires --type)"},
 		{Name: "type", Enum: []string{"doc", "docx", "sheet", "sheets", "base", "bitable", "slides", "file", "minutes", "wiki"}, Desc: "resource type (required with --token; auto-detected for --url)"},
 		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "cap each rendered table to N data rows (0 = no limit)"},
-		{Name: "full", Type: "bool", Default: "false", Desc: "doc only: return the whole document in one response (disable auto-pagination)"},
-		{Name: "page-token", Desc: "doc only: continue a paginated read from a prior next_page_token"},
-		{Name: "page-size", Type: "int", Default: "0", Desc: "doc only: per-page token budget hint (0 = server default)"},
+		{Name: "full", Type: "bool", Default: "false", Desc: "docx/file only: return the whole document in one response (disable auto-pagination)"},
+		{Name: "page-token", Desc: "docx/file only: continue a paginated read from a prior next_page_token"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "docx/file only: per-page token budget hint (0 = server default)"},
 		{Name: "include", Desc: "minutes only: comma-separated extras to append: transcript, note-doc"},
 	},
 	Tips: []string{
@@ -157,6 +157,9 @@ func emitDriveFetch(runtime *common.RuntimeContext, out *driveFetchOutput, res f
 	// envelope.
 	if os.Getenv("LARK_CLI_FETCH_DEBUG") != "" {
 		fmt.Fprintf(runtime.IO().ErrOut, "[fetch] backend: %s\n", out.backend)
+		if out.note != "" {
+			fmt.Fprintf(runtime.IO().ErrOut, "[fetch] note: %s\n", out.note)
+		}
 	}
 	runtime.OutFormatRaw(env, nil, func(w io.Writer) {
 		fmt.Fprintln(w, out.content)
@@ -172,6 +175,7 @@ type driveFetchOutput struct {
 	createTime string // minutes only
 	hasMore    bool
 	nextToken  string
-	backend    string // debug discriminator (stderr only)
-	warnings   []string
+	backend  string // debug discriminator (stderr only)
+	note     string // debug-only note (e.g. fallback reason); stderr under LARK_CLI_FETCH_DEBUG, never in JSON
+	warnings []string
 }

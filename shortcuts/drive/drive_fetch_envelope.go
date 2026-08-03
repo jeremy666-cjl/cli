@@ -51,7 +51,7 @@ func newFetchEnvelope(content string, res fetchResource) *fetchEnvelope {
 	return &fetchEnvelope{Content: content, Resource: res}
 }
 
-// withPagination records the doc-lane pagination cursor so a --format json
+// withPagination records the docx/file-lane pagination cursor so a --format json
 // consumer sees has_more / next_page_token alongside the content. No-op when
 // hasMore is false.
 func (e *fetchEnvelope) withPagination(hasMore bool, nextToken string) *fetchEnvelope {

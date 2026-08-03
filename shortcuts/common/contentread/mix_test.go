@@ -212,20 +212,78 @@ func TestRenderMix_SheetTruncation(t *testing.T) {
 
 func TestRenderMix_EmbeddedBitablePlaceholder(t *testing.T) {
 	t.Parallel()
-	// A component ref carries no inner <table> → id'd placeholder. The resource
-	// token rides in a `token=`-tagged markdown link URL (matching docs +fetch
-	// xml); source-doc-id is not a resource token and stays out.
+	// A component ref the server did not expand carries no inner <table> → id'd
+	// placeholder. The resource token rides in a `token=`-tagged markdown link URL
+	// (matching docs +fetch xml); source-doc-id is not a resource token and stays out.
 	xml := `<bitable id="blk_bt" token="bbl_secret" table-id="tblX" source-doc-id="docY"></bitable>`
 	got := mustRenderMix(t, xml, nil, 0)
 
 	if !strings.Contains(got, "**[表：内嵌多维表格](token=bbl_secret)** {#blk_bt}") {
 		t.Errorf("bitable placeholder wrong:\n%s", got)
 	}
-	if !strings.Contains(got, "--inline-embeds") {
-		t.Errorf("want hint pointing at --inline-embeds, got:\n%s", got)
+	if !strings.Contains(got, "base 技能") {
+		t.Errorf("want hint pointing at base skill, got:\n%s", got)
 	}
 	if strings.Contains(got, "docY") {
 		t.Errorf("source-doc-id must not leak, got:\n%s", got)
+	}
+}
+
+func TestRenderMix_EmbeddedBitableExpanded(t *testing.T) {
+	t.Parallel()
+	// The server now expands an embedded bitable inline as an inner HTML <table>,
+	// so collectRows materializes it to GFM just like a native sheet — {#blockid}
+	// anchor and resource token both preserved. The "| x |" spacing is the
+	// client-side rowsToGFM fingerprint (server-given markdown has no spaces).
+	xml := `<bitable id="blk_bt" token="bbl_secret" table-id="tblX"><table><tr><th>业务</th><th>poc</th></tr><tr><td>知识问答</td><td>@崔</td></tr></table></bitable>`
+	got := mustRenderMix(t, xml, nil, 0)
+
+	if !strings.Contains(got, "**[表](token=bbl_secret)** {#blk_bt}") {
+		t.Errorf("bitable header line wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "| 业务 | poc |") {
+		t.Errorf("want GFM header with client-side spacing, got:\n%s", got)
+	}
+	if !strings.Contains(got, "| 知识问答 | @崔 |") {
+		t.Errorf("want GFM data row, got:\n%s", got)
+	}
+}
+
+func TestRenderMix_EmbeddedSyncedMarkdown(t *testing.T) {
+	t.Parallel()
+	// 文本型组件（synced 同步块）：服务端把展开后的 markdown XML-转义后放在 tag 体，
+	// decoder 反转义后原样输出（与 inline-embeds 的 markdown 拼接对齐），不再是"内嵌表未展开"占位符。
+	xml := "<synced id=\"blk_syn\" source-doc-id=\"docY\">同步块第一行\n第二行&lt;a&gt;</synced>"
+	got := mustRenderMix(t, xml, nil, 0)
+
+	if !strings.Contains(got, "**同步块** {#blk_syn}") {
+		t.Errorf("synced header line wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "同步块第一行") || !strings.Contains(got, "第二行<a>") {
+		t.Errorf("want inlined + un-escaped markdown text, got:\n%s", got)
+	}
+	if strings.Contains(got, "base 技能") {
+		t.Errorf("expanded synced must not be a placeholder, got:\n%s", got)
+	}
+	if strings.Contains(got, "docY") {
+		t.Errorf("source-doc-id must not leak, got:\n%s", got)
+	}
+}
+
+func TestRenderMix_EmbeddedComponentMarkdown(t *testing.T) {
+	t.Parallel()
+	// task/okr 走默认 "component" 标签：物化后的 markdown 文本内联输出（不再是占位符）。
+	xml := "<component id=\"blk_task\">任务：完成方案设计\n状态：未完成</component>"
+	got := mustRenderMix(t, xml, nil, 0)
+
+	if !strings.Contains(got, "**引用内容** {#blk_task}") {
+		t.Errorf("component header line wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "任务：完成方案设计") || !strings.Contains(got, "状态：未完成") {
+		t.Errorf("want inlined markdown text, got:\n%s", got)
+	}
+	if strings.Contains(got, "base 技能") {
+		t.Errorf("expanded component must not be a placeholder, got:\n%s", got)
 	}
 }
 

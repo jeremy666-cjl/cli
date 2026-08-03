@@ -15,27 +15,6 @@ import (
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
-// MixOptions configures the mix lane (whole-doc markdown + {#blockid} anchors).
-// It is the runtime-flag-decoupled form of the --embed-max-rows / --full /
-// --page-token / --page-size flags, so a caller can run the mix lane without
-// populating a flag surface.
-type MixOptions struct {
-	MaxRows   int
-	Full      bool
-	PageToken string
-	PageSize  int
-}
-
-// MixResult is the output of the mix lane: the rendered markdown, document
-// metadata, and (when the doc is paginated) the cursor for the next page.
-type MixResult struct {
-	Content       string
-	Title         string
-	UpdateTime    int64
-	HasMore       bool
-	NextPageToken string
-}
-
 // FetchMix runs the mix lane for a resolved docx URL: it posts the URL with
 // WithBlockID=true, renders the returned FullContent (XML with real block ids) to
 // "shallow id" markdown (readable body + {#blockid} anchors on
@@ -46,7 +25,7 @@ type MixResult struct {
 // On any failure FetchMix returns an error wrapped with a stage code (fetch /
 // no-blockid / mix-render / mix-empty). Callers own the fallback — docs +fetch
 // falls through to native docs_ai, drive +fetch falls back to FetchNativeMarkdown.
-func FetchMix(ctx context.Context, runtime *common.RuntimeContext, docxURL string, opts MixOptions) (*MixResult, error) {
+func FetchMix(ctx context.Context, runtime *common.RuntimeContext, docxURL string, opts FetchOptions) (*FetchResult, error) {
 	req := NewRequest(docxURL)
 	req.WithBlockID = true
 	ApplyPagination(&req, opts.Full, opts.PageToken, opts.PageSize)
@@ -70,7 +49,7 @@ func FetchMix(ctx context.Context, runtime *common.RuntimeContext, docxURL strin
 	if strings.TrimSpace(md) == "" {
 		return nil, fmt.Errorf("mix-empty: rendered empty content")
 	}
-	return &MixResult{
+	return &FetchResult{
 		Content:       md,
 		Title:         resp.Title,
 		UpdateTime:    resp.UpdateTime,
@@ -82,10 +61,11 @@ func FetchMix(ctx context.Context, runtime *common.RuntimeContext, docxURL strin
 // RenderMix renders a docx fetch response into "shallow id" markdown: a readable
 // body plus {#blockid} anchors on headings / tables / images / boards, so a model
 // can address a block for write-back. The response's FullContent must be the
-// XML-with-block-id form (requested via Request.WithBlockID). Native sheets (which
-// carry an inner HTML <table>) expand to GFM; embedded bitable/component refs (no
-// inner table) render as an id'd placeholder. maxRows truncates GFM tables (<= 0
-// disables). Returns "" when the response carries no content.
+// XML-with-block-id form (requested via Request.WithBlockID). Embedded tables
+// (native sheets, and embedded bitables the server expands inline) carry an inner
+// HTML <table> and expand to GFM; a block the server did not expand renders as an
+// id'd placeholder. maxRows truncates GFM tables (<= 0 disables). Returns "" when
+// the response carries no content.
 func RenderMix(resp *Response, maxRows int) (string, error) {
 	if resp == nil || strings.TrimSpace(resp.FullContent) == "" {
 		return "", nil
@@ -96,13 +76,14 @@ func RenderMix(resp *Response, maxRows int) (string, error) {
 var mixBlankRunRe = regexp.MustCompile(`\n{3,}`)
 
 // renderMix turns the XML-with-block-id form of FullContent (real block ids) into
-// mix markdown. Native sheets (which carry an inner HTML <table>) expand to GFM;
-// embedded bitable/component refs (no inner table) render as an id'd placeholder.
-// Only heading / table / image / board get a {#blockid} anchor; paragraphs, lists
-// and code stay anchor-free (the "shallow" of mix). The XML decoder tolerates the
-// embedded HTML table (void tags, &nbsp;, missing ends) via HTMLAutoClose /
-// HTMLEntity; XML-illegal control chars are stripped first (PDF-derived content
-// can carry stray U+000C/U+0008 which the decoder rejects even with Strict=false).
+// mix markdown. Embedded tables (native sheets, and embedded bitables the server
+// expands inline) carry an inner HTML <table> and expand to GFM; a block the
+// server did not expand renders as an id'd placeholder. Only heading / table /
+// image / board get a {#blockid} anchor; paragraphs, lists and code stay
+// anchor-free (the "shallow" of mix). The XML decoder tolerates the embedded HTML
+// table (void tags, &nbsp;, missing ends) via HTMLAutoClose / HTMLEntity;
+// XML-illegal control chars are stripped first (PDF-derived content can carry
+// stray U+000C/U+0008 which the decoder rejects even with Strict=false).
 func renderMix(xmlContent string, metas map[string]*ImageMeta, maxRows int) (string, error) {
 	r := &mixRenderer{metas: metas}
 	// Wrap in a synthetic root so the fragment is a single well-formed document.
@@ -257,54 +238,90 @@ func (r *mixRenderer) renderImg(start xml.StartElement) string {
 	return base + idSuffix(realID(start))
 }
 
-// renderEmbedTable handles <sheet>/<bitable>/<synced>/<component>. A native sheet
-// carries an inner HTML <table> → GFM. A component ref carries no rows → an id'd
-// placeholder. A resource token (when present) is emitted as a `token=`-tagged
+// renderEmbedTable handles <sheet>/<bitable>/<synced>/<component>. The server
+// materializes each in one of two shapes:
+//   - Table-type (sheet/bitable/referenceBase): an inner HTML <table> → GFM.
+//   - Text-type (synced/task/okr): the expanded markdown, XML-escaped, carried as
+//     the tag's character data; the decoder un-escapes it and we emit it verbatim
+//     — aligned with the inline-embeds markdown lane, so these refs expand in mix
+//     instead of degrading to a placeholder.
+//
+// When the server expanded neither (no rows and no text) the block falls back to
+// an id'd placeholder. A resource token (when present) is emitted as a `token=`-tagged
 // markdown link URL (matching docs +fetch --doc-format xml and the <img>
 // image_key convention) — the token reads as a reference, and the `token=` prefix
 // keeps it distinct from the {#blockid} write-back anchor that follows it.
 func (r *mixRenderer) renderEmbedTable(dec *xml.Decoder, start xml.StartElement) error {
 	id := realID(start)
 	token := attrOf(start, "token")
-	rows, err := r.collectRows(dec, start.Name.Local)
+	rows, rawText, err := r.collectRows(dec, start.Name.Local)
 	if err != nil {
 		return err
 	}
-	if len(rows) == 0 {
-		r.out.WriteString("**" + resTokenLink("表：内嵌多维表格", token) + "**" + idSuffix(id) + "\n")
-		r.out.WriteString("> 内嵌表未展开，用 --inline-embeds 取全量\n\n")
+	if len(rows) > 0 {
+		r.out.WriteString("**" + resTokenLink("表", token) + "**" + idSuffix(id) + "\n\n")
+		r.out.WriteString(rowsToGFM(rows))
+		r.out.WriteString("\n")
 		return nil
 	}
-	r.out.WriteString("**" + resTokenLink("表", token) + "**" + idSuffix(id) + "\n\n")
-	r.out.WriteString(rowsToGFM(rows))
-	r.out.WriteString("\n")
+	// 文本型组件：服务端把展开后的 markdown（转义后）放在 tag 体，decoder 已反转义，原样输出。
+	if md := strings.TrimSpace(rawText); md != "" {
+		r.out.WriteString("**" + resTokenLink(embedLabel(start.Name.Local), token) + "**" + idSuffix(id) + "\n\n")
+		r.out.WriteString(md)
+		r.out.WriteString("\n")
+		return nil
+	}
+	// 既无表格也无文本：未物化的占位符。
+	r.out.WriteString("**" + resTokenLink("表：内嵌多维表格", token) + "**" + idSuffix(id) + "\n")
+	r.out.WriteString("> 内嵌表未展开，用 base 技能取结构化数据\n\n")
 	return nil
 }
 
+// embedLabel picks a readable label for a text-type embed by its tag. "synced" is
+// a cross-doc sync block; task/okr/project refs all render as the default
+// "component" tag server-side (componentRefTag). Table types (sheet/bitable) carry
+// rows and use their own label in the table branch above.
+func embedLabel(tag string) string {
+	switch tag {
+	case "synced":
+		return "同步块"
+	case "component":
+		return "引用内容"
+	default:
+		return "嵌入内容"
+	}
+}
+
 // collectRows reads every <tr> (at any depth: thead/tbody/table wrappers are
-// transparent) until the closing tag of name.
-func (r *mixRenderer) collectRows(dec *xml.Decoder, name string) ([][]string, error) {
-	var rows [][]string
+// transparent) until the closing tag of name, and also accumulates the tag's raw
+// character data into rawText. Table-type embeds (sheet/bitable) carry an inner
+// <table> → rows; text-type embeds (synced/task/okr) carry escaped markdown as
+// character data → rawText (rows empty). Callers fall back to rawText when no rows
+// were collected. The decoder un-escapes XML entities, so rawText is plain text.
+func (r *mixRenderer) collectRows(dec *xml.Decoder, name string) (rows [][]string, rawText string, err error) {
+	var text strings.Builder
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
-			return rows, nil
+			return rows, text.String(), nil
 		}
 		if err != nil {
-			return rows, err
+			return rows, text.String(), err
 		}
 		switch t := tok.(type) {
+		case xml.CharData:
+			text.Write(t)
 		case xml.StartElement:
 			if t.Name.Local == "tr" {
 				cells, err := r.collectCells(dec)
 				if err != nil {
-					return rows, err
+					return rows, text.String(), err
 				}
 				rows = append(rows, cells)
 			}
 		case xml.EndElement:
 			if t.Name.Local == name {
-				return rows, nil
+				return rows, text.String(), nil
 			}
 		}
 	}

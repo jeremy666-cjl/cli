@@ -157,7 +157,7 @@ func TestDriveFetchValidation_FullOnSheet(t *testing.T) {
 	setDriveFetchE2EEnv(t)
 	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/sheets/shtcnX", "--full", "--dry-run")
 	result.AssertExitCode(t, 2)
-	require.Contains(t, result.Stderr, "only apply to doc/docx",
+	require.Contains(t, result.Stderr, "only apply to doc/docx and file",
 		"--full should be rejected on a sheet, stderr:\n%s", result.Stderr)
 }
 
@@ -202,6 +202,62 @@ func TestDriveFetchDryRun_DocxFullDisablesPagination(t *testing.T) {
 		"--full must disable pagination (field omitted), stdout:\n%s", result.Stdout)
 	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.with_block_id").Bool(),
 		"--full still requests block-id anchors, stdout:\n%s", result.Stdout)
+}
+
+// TestDriveFetchDryRun_FilePaginationFlags proves --page-token/--page-size flow
+// into the file (PDF/Word/Excel) request body the same way as docx — except the
+// file lane never requests block-id anchors (with_block_id absent), since file
+// content has no write-back blocks.
+func TestDriveFetchDryRun_FilePaginationFlags(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnPage",
+		"--page-token", "tok", "--page-size", "5", "--dry-run")
+	result.AssertExitCode(t, 0)
+
+	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
+		"file lane should enable pagination when --full is absent, stdout:\n%s", result.Stdout)
+	require.Equal(t, "tok", gjson.Get(result.Stdout, "data.api.0.body.page_token").String(),
+		"--page-token should forward into the body, stdout:\n%s", result.Stdout)
+	require.Equal(t, int64(5), gjson.Get(result.Stdout, "data.api.0.body.page_size").Int(),
+		"--page-size should forward into the body, stdout:\n%s", result.Stdout)
+	require.False(t, gjson.Get(result.Stdout, "data.api.0.body.with_block_id").Exists(),
+		"file lane must not request block-id anchors (no write-back blocks), stdout:\n%s", result.Stdout)
+}
+
+// TestDriveFetchDryRun_FileFullDisablesPagination proves --full switches the file
+// lane to whole-doc mode: enable_pagination is omitted (off).
+func TestDriveFetchDryRun_FileFullDisablesPagination(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnFull", "--full", "--dry-run")
+	result.AssertExitCode(t, 0)
+
+	require.False(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Exists(),
+		"--full must disable pagination (field omitted), stdout:\n%s", result.Stdout)
+	require.False(t, gjson.Get(result.Stdout, "data.api.0.body.with_block_id").Exists(),
+		"file lane must not request block-id anchors, stdout:\n%s", result.Stdout)
+}
+
+// TestDriveFetchDryRun_SheetRejectsPagination proves --page-token is rejected on
+// sheet (the fetch service doesn't paginate sheet/base/slides) — only docx and
+// file accept the pagination flags.
+func TestDriveFetchDryRun_SheetRejectsPagination(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/sheets/shtcnX",
+		"--page-token", "tok", "--dry-run")
+	result.AssertExitCode(t, 2)
+	require.Contains(t, result.Stderr, "only apply to doc/docx and file",
+		"--page-token should be rejected on sheet, stderr:\n%s", result.Stderr)
+}
+
+// TestDriveFetchDryRun_FileFullAndPageTokenRejected proves --full + --page-token
+// are mutually exclusive on the file lane (same rule as docx).
+func TestDriveFetchDryRun_FileFullAndPageTokenRejected(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnX",
+		"--full", "--page-token", "tok", "--dry-run")
+	result.AssertExitCode(t, 2)
+	require.Contains(t, result.Stderr, "cannot be combined",
+		"--full + --page-token should be rejected on file, stderr:\n%s", result.Stderr)
 }
 
 // TestDriveFetchDryRun_MinutesIncludeForwarded proves --include transcript is

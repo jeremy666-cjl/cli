@@ -13,15 +13,16 @@ import (
 	"github.com/larksuite/cli/shortcuts/minutes"
 )
 
-// validateLaneFlags checks doc-only (--full/--page-token/--page-size) and
+// validateLaneFlags checks docx/file-only (--full/--page-token/--page-size) and
 // minutes-only (--include) flags against the resolved fetch type. Called both
 // at validate time (non-wiki input) and after a wiki node is unwrapped to its
 // underlying type, so a wiki→sheet with --page-token or wiki→non-minutes with
 // --include is rejected the same as a direct URL instead of being silently ignored.
+// Only docx and file (e.g. PDF/Word/Excel) are paginated server-side.
 func validateLaneFlags(runtime *common.RuntimeContext, fetchType string) error {
 	hasPag := runtime.Bool("full") || strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0
-	if hasPag && fetchType != "docx" {
-		return common.ValidationErrorf("--full/--page-token/--page-size only apply to doc/docx (got %s)", fetchType).WithParam("--full")
+	if hasPag && fetchType != "docx" && fetchType != "file" {
+		return common.ValidationErrorf("--full/--page-token/--page-size only apply to doc/docx and file (got %s)", fetchType).WithParam("--full")
 	}
 	if strings.TrimSpace(runtime.Str("include")) != "" && fetchType != "minutes" {
 		return common.ValidationErrorf("--include only applies to minutes (got %s)", fetchType).WithParam("--include")
@@ -38,7 +39,7 @@ func validateFetch(_ context.Context, runtime *common.RuntimeContext) error {
 	if err != nil {
 		return err
 	}
-	// Pagination flags only apply to the doc lane; --include only to minutes.
+	// Pagination flags only apply to the docx/file lanes; --include only to minutes.
 	// For wiki input the lane is unknown until unwrap, so defer those checks to
 	// execute (validateLaneFlags runs again after the wiki node is resolved).
 	if in.inputType != "wiki" {
@@ -78,19 +79,19 @@ func PlanFetchDryRun(_ context.Context, runtime *common.RuntimeContext) *common.
 	case "docx":
 		body := contentread.NewRequest(fetchResourceURL(runtime.Config.Brand, in, in.inputType, in.token, false))
 		body.WithBlockID = true
-		if !runtime.Bool("full") {
-			body.EnablePagination = true
-			body.PageToken = strings.TrimSpace(runtime.Str("page-token"))
-			if n := runtime.Int("page-size"); n > 0 {
-				body.PageSize = int32(n)
-			}
-		}
+		contentread.ApplyPagination(&body, runtime.Bool("full"), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
 		dry.POST(contentread.Path).
 			Desc("fetch document (mix: markdown + block-id anchors)").
 			Body(body)
 		dry.POST("/open-apis/docs_ai/v1/documents/<token>/fetch").
 			Desc("native docs_ai markdown fallback (only if mix unavailable)")
-	case "sheet", "bitable", "slides", "file":
+	case "file":
+		body := contentread.NewRequest(fetchResourceURL(runtime.Config.Brand, in, in.inputType, in.token, false))
+		contentread.ApplyPagination(&body, runtime.Bool("full"), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
+		dry.POST(contentread.Path).
+			Desc("fetch file as markdown (paginated; e.g. PDF/Word/Excel)").
+			Body(body)
+	case "sheet", "bitable", "slides":
 		body := contentread.NewRequest(fetchResourceURL(runtime.Config.Brand, in, in.inputType, in.token, false))
 		dry.POST(contentread.Path).
 			Desc(fmt.Sprintf("fetch %s as markdown", in.inputType)).

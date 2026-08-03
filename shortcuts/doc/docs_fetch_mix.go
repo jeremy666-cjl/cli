@@ -95,7 +95,7 @@ func emitFetchLane(runtime *common.RuntimeContext, content, title string, update
 // block-id anchors). On failure it routes through fetchLaneFail.
 func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled bool, err error) {
 	continuation := contentread.IsPageContinuation(strings.TrimSpace(runtime.Str("page-token")))
-	opts := contentread.MixOptions{
+	opts := contentread.FetchOptions{
 		MaxRows:   runtime.Int("embed-max-rows"),
 		Full:      runtime.Bool("full"),
 		PageToken: strings.TrimSpace(runtime.Str("page-token")),
@@ -109,39 +109,15 @@ func runMixFetch(ctx context.Context, runtime *common.RuntimeContext) (handled b
 	return true, nil
 }
 
-// runInlineEmbedsFetch handles `docs +fetch --doc-format markdown
-// --inline-embeds`: materialized markdown with embedded tables expanded to GFM.
-func runInlineEmbedsFetch(ctx context.Context, runtime *common.RuntimeContext) (handled bool, err error) {
-	continuation := contentread.IsPageContinuation(strings.TrimSpace(runtime.Str("page-token")))
-	req := contentread.NewRequest(resolvedFetchURL(runtime))
-	contentread.ApplyPagination(&req, runtime.Bool("full"), runtime.Str("page-token"), runtime.Int("page-size"))
-	resp, ferr := contentread.FetchDocInfo(ctx, runtime, req)
-	if ferr != nil {
-		return fetchLaneFail(runtime, continuation, "fetch", ferr)
-	}
-	if resp == nil || strings.TrimSpace(resp.FullContent) == "" {
-		return fetchLaneFail(runtime, continuation, "empty", fmt.Errorf("empty content"))
-	}
-	md := contentread.RenderMarkdown(resp, runtime.Int("embed-max-rows"), "")
-	emitFetchLane(runtime, md, resp.Title, resp.UpdateTime, resp.HasMore, resp.NextPageToken)
-	return true, nil
-}
-
-// dryRunFetchLane describes the fetch-lane call for --dry-run. anchored=true is
-// the mix lane (block-id anchors); false is the materialized-markdown lane.
-func dryRunFetchLane(runtime *common.RuntimeContext, anchored bool) *common.DryRunAPI {
+// dryRunFetchLane describes the mix-lane fetch call for --dry-run: POST the docx
+// URL with WithBlockID (markdown + block-id anchors) and the pagination trio.
+func dryRunFetchLane(runtime *common.RuntimeContext) *common.DryRunAPI {
 	body := contentread.NewRequest(typedFetchURL(runtime))
-	if anchored {
-		body.WithBlockID = true
-	}
+	body.WithBlockID = true
 	contentread.ApplyPagination(&body, runtime.Bool("full"), runtime.Str("page-token"), runtime.Int("page-size"))
-	desc := "fetch document (materialized markdown)"
-	if anchored {
-		desc = "fetch document (mix: markdown + block-id anchors)"
-	}
 	return common.NewDryRunAPI().
 		POST(contentread.Path).
-		Desc(desc).
+		Desc("fetch document (mix: markdown + block-id anchors)").
 		Body(body).
 		Set("embed_max_rows", runtime.Int("embed-max-rows"))
 }

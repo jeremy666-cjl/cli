@@ -15,12 +15,12 @@ package contentread
 // rendering (so the cli can attach {#blockid} anchors); the markdown lanes leave
 // it false so omitempty drops it from the wire.
 //
-// The pagination trio (EnablePagination / PageToken / PageSize) is set only by
-// the doc lanes (mix + inline-embeds), so a large doc comes back as page 1 + a
-// NextPageToken the model can follow instead of one oversized payload. All three
-// are omitempty, so the lanes that never set them (sheet / base / slides / file)
-// keep their exact prior wire shape. PageSize is a hint; the server clamps it to
-// its band.
+// The pagination trio (EnablePagination / PageToken / PageSize) is set by the
+// paginated lanes — docx (mix) and file — so a large resource
+// comes back as page 1 + a NextPageToken the model can follow instead of one
+// oversized payload. All three are omitempty, so the lanes that never set them
+// (sheet / base / slides) keep their exact prior wire shape. PageSize is a hint;
+// the server clamps it to its band.
 type Request struct {
 	URL              string `json:"url"`
 	WithBlockID      bool   `json:"with_block_id,omitempty"`

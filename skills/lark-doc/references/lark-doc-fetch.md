@@ -1,5 +1,12 @@
 
-# docs +fetch（获取飞书云文档）
+# docs +fetch
+
+读取飞书文档（docx / wiki）内容的入口。两种用法：
+
+- **markdown 速览整篇**：`--doc-format markdown` —— 整篇可读 markdown，标题/表/图/画板带 `{#block-id}` 浅锚点；大文档分页；`--inline-embeds` 把内嵌的多维表展成 GFM 表。
+- **xml 精读 / 编辑**：默认 xml —— `--scope` 局部精读（目录/章节/区间/关键词）+ `--detail` 拿 block-id/样式，用于定位和编辑。
+
+> 跨类型速览（一个 URL 读文档/表格/幻灯片/文件…，不挑类型）用 `drive +fetch`（见 [lark-drive-fetch.md](../../lark-drive/references/lark-drive-fetch.md)）；docx 的深度精读、拿 block-id、展开内嵌表用本命令。
 
 ## 命令
 
@@ -29,7 +36,28 @@ lark-cli docs +fetch --doc Z1Fj...tnAc \
 # 按关键词定位（多关键词用 | 分隔，任一命中即返回）
 lark-cli docs +fetch --doc Z1Fj...tnAc \
   --scope keyword --keyword "部署|发布|上线"
+
+# markdown 整篇速览（带 {#block-id} 浅锚点，大文档分页）
+lark-cli docs +fetch --doc Z1Fj...tnAc --doc-format markdown
+
+# markdown + 展开内嵌多维表到 GFM
+lark-cli docs +fetch --doc Z1Fj...tnAc --doc-format markdown --inline-embeds
+
+# 大 markdown 文档续读下一页
+lark-cli docs +fetch --doc Z1Fj...tnAc --doc-format markdown --page-token <next_page_token>
 ```
+
+## markdown 整篇速览（--doc-format markdown）
+
+整篇读成可读 markdown，标题/表/图/画板后挂 `{#block-id}` 浅锚点（和 `drive +fetch` 读 docx 的输出一致）。大文档默认分页，返回第 1 页 + `has_more` / `next_page_token`，用 `--page-token` 续读、`--full` 一次拿整篇。
+
+- `{#block-id}`：定位文档里的这块内容；要回写编辑先拿可编辑结构（`--doc-format xml --detail with-ids`）。
+- `--inline-embeds`：把文档内嵌的**多维表格**（默认是 `[](token=xxx)` 占位）展成 GFM 表；内嵌电子表格默认已展 GFM。都受 `--embed-max-rows` 截断。
+- `--full` / `--page-token` / `--page-size`：仅 markdown 整篇可用；`--full` 不能和 `--page-token` / `--page-size` 同用。
+
+> 带 `--revision-id`（历史版本）或显式 `--lang` 时，分页 / `--inline-embeds` 不适用（这两种走标准导出，不支持这些增强）。
+
+精读局部 / 拿 block-id 编辑用下面的 xml 模式（`--scope` + `--detail`）。
 
 ## 选 `--detail`（每块详细度）
 
@@ -118,6 +146,11 @@ lark-cli docs +fetch --doc Z1Fj...tnAc \
 | `--context-before` | 否 | 命中前拉几个兄弟块（仅对顶层单元生效，默认 `0`） |
 | `--context-after` | 否 | 命中后拉几个兄弟块（仅对顶层单元生效，默认 `0`） |
 | `--max-depth` | 否 | `outline` = 标题层级上限；其它 = 子树深度（`-1` 不限，默认） |
+| `--inline-embeds` | 否 | 仅 markdown 整篇：展开内嵌多维表/电子表格到 GFM |
+| `--full` | 否 | 仅 markdown 整篇：一次返回整篇，关闭分页 |
+| `--page-token` | 否 | 仅 markdown 整篇：续读下一页；不能与 `--full` 同用 |
+| `--page-size` | 否 | 仅 markdown 整篇：每页大小提示（0 = 服务端默认），不能与 `--full` 同用 |
+| `--embed-max-rows` | 否 | 仅 markdown：每表最多 N 行（默认 50，0 = 不限） |
 | `--format` | 否 | `json`（默认）\| `pretty` |
 
 ## 图片、文件、画板的处理
@@ -137,7 +170,9 @@ lark-cli docs +fetch --doc Z1Fj...tnAc \
 
 ## 嵌入电子表格 / 多维表格
 
-返回中可能含 `<sheet>`、`<bitable>`、`<cite file-type="sheets|bitable">`。内部数据无法通过 `docs +fetch` 获取，提取 `token` 等属性后切到 [`lark-sheets`](../../lark-sheets/SKILL.md) / [`lark-base`](../../lark-base/SKILL.md) 下钻，详见 [SKILL.md 快速决策](../SKILL.md) 路由表。
+**xml 模式**：返回中可能含 `<sheet>`、`<bitable>`、`<cite file-type="sheets|bitable">`。内部数据无法通过 `docs +fetch` 获取，提取 `token` 等属性后切到 [`lark-sheets`](../../lark-sheets/SKILL.md) / [`lark-base`](../../lark-base/SKILL.md) 下钻，详见 [SKILL.md 快速决策](../SKILL.md) 路由表。
+
+**markdown 整篇模式**：内嵌电子表格默认展成 GFM 表；内嵌多维表格默认是 `[](token=xxx)` 占位（拿 token 去 base 技能取结构化数据），加 `--inline-embeds` 展成 GFM 表（受 `--embed-max-rows` 截断）。
 
 ## 参考
 

@@ -1021,8 +1021,7 @@ func newFetchShortcutTestRuntime(t *testing.T, apiVersion string, setFlags map[s
 	cmd.Flags().Int("max-depth", fetchDefaultInt("max-depth"), "")
 	cmd.Flags().String("offset", "", "")
 	cmd.Flags().String("limit", "", "")
-	// knowledge-qa enhancement flags (mix / inline-embeds lane).
-	cmd.Flags().Bool("inline-embeds", false, "")
+	// knowledge-qa enhancement flags (mix lane).
 	cmd.Flags().Bool("full", false, "")
 	cmd.Flags().String("page-token", "", "")
 	cmd.Flags().Int("page-size", 0, "")
@@ -1071,7 +1070,7 @@ func TestFetchLaneRevisionAndLangForceNative(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rt := newFetchShortcutTestRuntime(t, "", tc.flags)
-			useFetchLane, _ := fetchLaneMode(rt)
+			useFetchLane := fetchLaneMode(rt)
 			if useFetchLane != tc.useFetchLane {
 				t.Fatalf("fetchLaneMode useFetchLane=%v, want %v (flags=%v)", useFetchLane, tc.useFetchLane, tc.flags)
 			}

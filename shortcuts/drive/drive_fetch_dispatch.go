@@ -28,7 +28,7 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 		if err := runtime.EnsureScopes([]string{"docx:document:readonly"}); err != nil {
 			return nil, err
 		}
-		opts := contentread.MixOptions{
+		opts := contentread.FetchOptions{
 			MaxRows:   maxRows,
 			Full:      runtime.Bool("full"),
 			PageToken: strings.TrimSpace(runtime.Str("page-token")),
@@ -52,9 +52,9 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 					"doc fetch unavailable (mix: %v; native: %v)", ferr, nerr)
 			}
 			return &driveFetchOutput{
-				content:  content,
-				backend:  "native_docs_ai",
-				warnings: []string{fmt.Sprintf("mix unavailable (%v); fell back to native docs_ai markdown", ferr)},
+				content: content,
+				backend: "native_docs_ai",
+				note:    fmt.Sprintf("mix fetch failed (%v); served native markdown", ferr),
 			}, nil
 		}
 		return &driveFetchOutput{
@@ -73,7 +73,15 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 		if err := runtime.EnsureScopes([]string{"docx:document:readonly"}); err != nil {
 			return nil, err
 		}
-		content, title, ut, ferr := contentread.FetchMarkdown(ctx, runtime, forwardURL, maxRows, fetchType)
+		opts := contentread.FetchOptions{
+			MaxRows:   maxRows,
+			Full:      runtime.Bool("full"),
+			PageToken: strings.TrimSpace(runtime.Str("page-token")),
+			PageSize:  runtime.Int("page-size"),
+		}
+		// FetchMarkdown applies pagination only for file (the one type the fetch
+		// service paginates); sheet/base/slides return whole content regardless.
+		res, ferr := contentread.FetchMarkdown(ctx, runtime, forwardURL, fetchType, opts)
 		if ferr != nil {
 			return nil, driveFetchLaneUnavailable(fetchType, ferr)
 		}
@@ -83,7 +91,14 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 			"slides":  "fetch_slides",
 			"file":    "fetch_drive",
 		}[fetchType]
-		return &driveFetchOutput{content: content, title: title, updateTime: ut, backend: backend}, nil
+		return &driveFetchOutput{
+			content:    res.Content,
+			title:      res.Title,
+			updateTime: res.UpdateTime,
+			hasMore:    res.HasMore,
+			nextToken:  res.NextPageToken,
+			backend:    backend,
+		}, nil
 
 	case "minutes":
 		include, _ := minutes.ParseIncludes(runtime.Str("include")) // validated
@@ -251,15 +266,18 @@ func fetchWikiDirect(ctx context.Context, runtime *common.RuntimeContext, in dri
 	if wikiURL == "" {
 		wikiURL = common.BuildResourceURL(runtime.Config.Brand, "wiki", in.token)
 	}
-	content, title, ut, ferr := contentread.FetchMarkdown(ctx, runtime, wikiURL, maxRows, "wiki")
+	// The wiki direct-fetch fallback reads whole-doc: the underlying type is
+	// unknown here, so pagination flags are ignored (FetchMarkdown applies them
+	// only for file).
+	res, ferr := contentread.FetchMarkdown(ctx, runtime, wikiURL, "wiki", contentread.FetchOptions{MaxRows: maxRows})
 	if ferr != nil {
 		return nil, driveFetchLaneUnavailable("wiki", ferr)
 	}
 	return &driveFetchOutput{
-		content:    content,
-		title:      title,
-		updateTime: ut,
+		content:    res.Content,
+		title:      res.Title,
+		updateTime: res.UpdateTime,
 		backend:    "fetch_wiki_direct",
-		warnings:   []string{fmt.Sprintf("wiki get_node failed (%v); read via direct fetch of the wiki URL", cause)},
+		note:       fmt.Sprintf("wiki get_node failed (%v); read via direct fetch of the wiki URL", cause),
 	}, nil
 }
