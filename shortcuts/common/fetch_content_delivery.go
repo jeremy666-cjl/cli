@@ -16,7 +16,7 @@ import (
 
 const (
 	// FetchContentSpillThreshold is the local temporary-file threshold for
-	// --full responses. It measures the final UTF-8 body, not the JSON envelope.
+	// complete responses. It measures the final UTF-8 body, not the JSON envelope.
 	FetchContentSpillThreshold = 24 * 1024
 	fetchContentPreviewLimit   = 512
 )
@@ -33,7 +33,7 @@ type FetchContentFile struct {
 }
 
 // FetchContentDelivery holds either the inline body or metadata for a saved
-// copy. Small and paginated reads keep the existing inline output.
+// copy. Small and non-spill-eligible reads keep the existing inline output.
 type FetchContentDelivery struct {
 	Content    string
 	InlineHint string
@@ -46,21 +46,22 @@ func (d FetchContentDelivery) Inline() bool { return d.File == nil }
 
 // PrepareFetchContentDelivery scans the complete response before saving the
 // fetched body, then returns either inline content or saved-file metadata.
-func PrepareFetchContentDelivery(runtime *RuntimeContext, safetyData any, content, contentJQPath string) (FetchContentDelivery, output.ScanResult, error) {
+func PrepareFetchContentDelivery(runtime *RuntimeContext, safetyData any, content, contentJQPath string, spillOversized bool, paginationRecovery string) (FetchContentDelivery, output.ScanResult, error) {
 	scan := runtime.ScanOutputForSafety(safetyData)
 	if scan.Blocked {
 		return FetchContentDelivery{}, scan, scan.BlockErr
 	}
 
 	delivery := FetchContentDelivery{Content: content}
-	autoSpill := runtime.Bool("full") &&
+	autoSpill := spillOversized &&
 		runtime.JqExpr == "" && len([]byte(content)) > FetchContentSpillThreshold
 	if !autoSpill {
 		return delivery, scan, nil
 	}
 	fallbackHint := fmt.Sprintf(
-		"Content remains inline because temporary-file delivery failed and may be truncated. If incomplete, rerun locally with --full --jq '%s' and redirect stdout to a new file; use --page-token only when shell redirection is unavailable.",
+		"Content remains inline because temporary-file delivery failed and may be truncated. If incomplete, rerun locally with --full --jq '%s' and redirect stdout to a new file; if shell redirection is unavailable, %s.",
 		contentJQPath,
+		paginationRecovery,
 	)
 	support, ok := runtime.FileIO().(fileio.LocalTemporaryFileSupport)
 	if !ok || !support.SupportsLocalTemporaryFiles() {

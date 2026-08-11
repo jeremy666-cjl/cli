@@ -591,6 +591,72 @@ func TestDocsFetchV2ReferenceMapFlagIsNotAvailable(t *testing.T) {
 	}
 }
 
+func TestDocsFetchReadModeFlagMetadata(t *testing.T) {
+	t.Parallel()
+	flags := make(map[string]common.Flag, len(v2FetchFlags()))
+	for _, flag := range v2FetchFlags() {
+		flags[flag.Name] = flag
+	}
+	full, ok := flags["full"]
+	if !ok || full.Type != "bool" || full.Default != "true" {
+		t.Fatalf("--full metadata = %#v, want bool default true", full)
+	}
+	paginate, ok := flags["paginate"]
+	if !ok || paginate.Type != "bool" || paginate.Default != "false" {
+		t.Fatalf("--paginate metadata = %#v, want bool default false", paginate)
+	}
+}
+
+func TestResolveDocsFetchReadMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		flags map[string]string
+		want  docsFetchReadMode
+	}{
+		{name: "default complete", want: docsFetchReadModeFull},
+		{name: "paginate", flags: map[string]string{"paginate": "true"}, want: docsFetchReadModePaginated},
+		{name: "page token", flags: map[string]string{"page-token": "cursor"}, want: docsFetchReadModePaginated},
+		{name: "explicit zero page size", flags: map[string]string{"page-size": "0"}, want: docsFetchReadModePaginated},
+		{name: "full false compatibility", flags: map[string]string{"full": "false"}, want: docsFetchReadModePaginated},
+		{name: "paginate false keeps default", flags: map[string]string{"paginate": "false"}, want: docsFetchReadModeFull},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runtime := newFetchShortcutTestRuntime(t, "", tt.flags)
+			if got := resolveDocsFetchReadMode(runtime); got != tt.want {
+				t.Fatalf("resolveDocsFetchReadMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDocsFetchSpillEligibilityStaysOnCompleteMarkdownNewPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		flags map[string]string
+		want  bool
+	}{
+		{name: "default complete markdown", flags: map[string]string{"doc-format": "markdown"}, want: true},
+		{name: "explicit pagination", flags: map[string]string{"doc-format": "markdown", "paginate": "true"}},
+		{name: "xml"},
+		{name: "partial markdown", flags: map[string]string{"doc-format": "markdown", "scope": "outline"}},
+		{name: "historical markdown", flags: map[string]string{"doc-format": "markdown", "revision-id": "42"}},
+		{name: "explicit language", flags: map[string]string{"doc-format": "markdown", "lang": "ja-JP"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runtime := newFetchShortcutTestRuntime(t, "", tt.flags)
+			if got := docsFetchSpillOversized(runtime); got != tt.want {
+				t.Fatalf("docsFetchSpillOversized() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDocsFetchDryRunDefaultsToV2Endpoint(t *testing.T) {
 	t.Parallel()
 
@@ -1019,7 +1085,8 @@ func newFetchShortcutTestRuntime(t *testing.T, apiVersion string, setFlags map[s
 	cmd.Flags().Int("max-depth", fetchDefaultInt("max-depth"), "")
 	cmd.Flags().String("offset", "", "")
 	cmd.Flags().String("limit", "", "")
-	cmd.Flags().Bool("full", false, "")
+	cmd.Flags().Bool("full", fetchDefault("full") == "true", "")
+	cmd.Flags().Bool("paginate", fetchDefault("paginate") == "true", "")
 	cmd.Flags().String("page-token", "", "")
 	cmd.Flags().Int("page-size", 0, "")
 	if apiVersion != "" {
@@ -1083,14 +1150,36 @@ func TestAnchoredMarkdownRevisionAndLangUseDocumentAPI(t *testing.T) {
 	}
 }
 
-func TestValidatePaginatedReadFlagsRevisionConflict(t *testing.T) {
+func TestValidateMarkdownReadModeFlagsAllowsImplicitDefaultOnDocumentAPIPaths(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		flags map[string]string
+	}{
+		{name: "xml default"},
+		{name: "partial markdown", flags: map[string]string{"doc-format": "markdown", "scope": "outline"}},
+		{name: "historical markdown", flags: map[string]string{"doc-format": "markdown", "revision-id": "42"}},
+		{name: "explicit language", flags: map[string]string{"doc-format": "markdown", "lang": "ja-JP"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runtime := newFetchShortcutTestRuntime(t, "", tt.flags)
+			if err := validateMarkdownReadModeFlags(runtime); err != nil {
+				t.Fatalf("implicit complete default rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateMarkdownReadModeFlagsRevisionConflict(t *testing.T) {
 	t.Parallel()
 	rt := newFetchShortcutTestRuntime(t, "", map[string]string{
 		"doc-format":  "markdown",
 		"revision-id": "42",
 		"full":        "true",
 	})
-	err := validatePaginatedReadFlags(rt)
+	err := validateMarkdownReadModeFlags(rt)
 	if err == nil {
 		t.Fatal("expected conflict error for --full + historical --revision-id")
 	}

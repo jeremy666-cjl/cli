@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/larksuite/cli/shortcuts/common/contentread"
@@ -40,14 +41,16 @@ var DriveFetch = common.Shortcut{
 		{Name: "token", Desc: "bare resource token (requires --type)"},
 		{Name: "type", Enum: []string{"doc", "docx", "sheet", "sheets", "base", "bitable", "slides", "file", "minutes", "wiki"}, Desc: "resource type (required with --token; auto-detected for --url)"},
 		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "cap each rendered table to N data rows (0 = no limit)"},
-		{Name: "full", Type: "bool", Default: "false", Desc: "return the whole resource content in one response (disable auto-pagination; not for minutes)"},
-		{Name: "page-token", Desc: "continue a paginated read from a prior next_page_token (not for minutes)"},
-		{Name: "page-size", Type: "int", Default: "0", Desc: "per-page token budget hint (0 = server default; not for minutes)"},
+		{Name: "full", Type: "bool", Default: "true", Desc: "return complete resource content; retained for compatibility (not for minutes)"},
+		{Name: "paginate", Type: "bool", Default: "false", Desc: "request server pagination instead of the default full read; bounded for doc/docx/file (not for minutes)"},
+		{Name: "page-token", Desc: "continue from a prior next_page_token (implies pagination; not for minutes)"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "per-page token budget hint (implies pagination; 0 = server default; not for minutes)"},
 		{Name: "include", Desc: "minutes only: comma-separated extras to append: transcript, note-doc"},
 	},
 	Tips: []string{
 		"Unified read entry: pass any Lark doc/sheet/base/slides/file/minutes URL (or --token --type) and get a readable markdown snapshot.",
 		"For doc deep-read with --scope/--detail use `docs +fetch`; for structured sheet/base data use `sheets +cells-get` / `base +record-list`.",
+		"Non-Minutes resources are read in full by default; oversized content is saved locally when temporary-file delivery is available. For bounded Doc/File reads, use --paginate; use structured commands for Sheet/Base ranges.",
 		"Wiki links are unwrapped to the underlying resource and read directly; the originating wiki node is recorded in resource.source.",
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -77,6 +80,11 @@ func RunFetch(ctx context.Context, runtime *common.RuntimeContext) error {
 		fmt.Fprintf(runtime.IO().ErrOut, "Resolving wiki node: %s\n", common.MaskToken(fetchToken))
 		node, werr := common.ResolveWikiNode(runtime, fetchToken)
 		if werr != nil {
+			if strings.TrimSpace(runtime.Str("include")) != "" {
+				return withFetchErrorContext(werr,
+					"could not resolve wiki resource type",
+					"`--include` can only be applied after resolving whether the Wiki node is Minutes; restore Wiki node access and retry, or remove `--include`")
+			}
 			// get_node failed (e.g. the user identity lacks wiki:node:retrieve
 			// scope, or the node is not found). The fetch service reads the wiki
 			// URL directly server-side (it unwraps the node itself) and paginates
@@ -143,7 +151,14 @@ func emitDriveFetch(runtime *common.RuntimeContext, out *driveFetchOutput, res f
 	env := newFetchEnvelope(out.content, res).
 		withPagination(out.hasMore, out.nextToken).
 		withWarnings(warnings...)
-	delivery, scan, err := common.PrepareFetchContentDelivery(runtime, env, out.content, ".data.content")
+	delivery, scan, err := common.PrepareFetchContentDelivery(
+		runtime,
+		env,
+		out.content,
+		".data.content",
+		out.spillOversized,
+		driveFetchPaginationRecovery(res.Type),
+	)
 	if err != nil {
 		return err
 	}
@@ -155,6 +170,21 @@ func emitDriveFetch(runtime *common.RuntimeContext, out *driveFetchOutput, res f
 		writeDriveFetchPretty(w, delivery, emitted.Resource, emitted.Warnings)
 	}, scan)
 	return nil
+}
+
+func driveFetchPaginationRecovery(fetchType string) string {
+	switch fetchType {
+	case "doc", "docx", "file", "wiki":
+		return "rerun with `--paginate`, then follow each returned `next_page_token` with `--page-token`"
+	case "sheet":
+		return "use `sheets +cells-get` to read bounded structured ranges"
+	case "bitable":
+		return "use `base +record-list` to read bounded structured records"
+	case "slides":
+		return "retry in a local runtime that supports temporary files, or open the deck in Lark/Feishu"
+	default:
+		return "retry in a local runtime that supports temporary files"
+	}
 }
 
 func writeDriveFetchPretty(w io.Writer, delivery common.FetchContentDelivery, resource fetchResource, warnings []string) {
@@ -190,4 +220,5 @@ type driveFetchOutput struct {
 	hasMore          bool
 	nextToken        string
 	warnings         []string
+	spillOversized   bool
 }

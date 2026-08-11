@@ -4,7 +4,7 @@
 
 对 Docx，本 shortcut 与 `docs +fetch --doc-format markdown` 的整篇读取复用同一套 Markdown 读取链路。已知 Doc / Docx 是否使用本命令，按 [`lark-doc`](../../lark-doc/SKILL.md) 的“快速决策”选择。
 
-Wiki URL 可直接使用本命令；首次结果不足时，根据 `data.resource.type`、`data.warnings`、`data.has_more` 和任务需要决定继续分页、整篇读取或切换实体 skill。
+Wiki URL 可直接使用本命令；读取后根据 `data.resource.type` 和任务需要决定是否切换实体 skill 做结构化查询。
 
 ## 什么时候用它，什么时候用别的
 
@@ -30,7 +30,7 @@ Wiki URL 可直接使用本命令；首次结果不足时，根据 `data.resourc
 | 妙记 minutes | `/minutes/` | 摘要 + 章节 + 待办 + 关键词；`--include transcript` 内联逐字稿，`--include note-doc` 获取关联纪要文档 token；取不到时保留正文并在 warnings 说明 |
 | 知识库 wiki | `/wiki/` | 先解包到底层资源，再按上表读 |
 
-除 Minutes 外，读取默认请求分页；服务端支持分页时返回当前页和续读游标，不支持时直接返回全部内容。
+除 Minutes 外，默认读取完整内容；正文超过 24 KiB 时，在运行环境支持本地临时文件的前提下自动落盘。Doc / Docx / File 需要限量读取，或完整读取失败、超时时，才改用分页；Sheet / Base 精确读取走实体命令。
 
 ## 命令
 
@@ -52,9 +52,10 @@ lark-cli drive +fetch --url "https://xxx.feishu.cn/wiki/wikcnxxx?table=tblXXX"
 | `--url` | 二选一 | 文档 URL（推荐） |
 | `--token` + `--type` | 二选一 | 裸 token 需 `--type`（docx / sheet / bitable / slides / file / minutes / wiki；也接受别名 doc / sheets / base） |
 | `--embed-max-rows` | 否 | 物化表格每表最多 N 行（默认 50，0 = 不限），超了截断并提示 |
-| `--full` | 否 | 除 Minutes 外：关闭自动分页，一次返回全部内容 |
-| `--page-token` | 否 | 除 Minutes 外：传入上次返回的 `next_page_token` 续读；不能与 `--full` 同用 |
-| `--page-size` | 否 | 除 Minutes 外：每页大小提示（默认 0 = 服务端默认）；不能与 `--full` 同用 |
+| `--full` | 否 | 除 Minutes 外：完整读取；已是默认行为，保留用于兼容现有调用 |
+| `--paginate` | 否 | 请求服务端分页；Doc / Docx / File 可用于限量读取，Sheet / Base 优先走实体命令 |
+| `--page-token` | 否 | 除 Minutes 外：传入上次返回的 `next_page_token` 续读，同时进入分页模式；不能与显式 `--full` 同用 |
+| `--page-size` | 否 | 除 Minutes 外：每页大小提示（0 = 服务端默认），同时进入分页模式；不能与显式 `--full` 同用 |
 | `--include` | 否 | 仅 minutes：`transcript` 内联逐字稿 / `note-doc` 取纪要文档 token |
 
 ## 输出
@@ -62,7 +63,7 @@ lark-cli drive +fetch --url "https://xxx.feishu.cn/wiki/wikcnxxx?table=tblXXX"
 默认输出遵循 CLI JSON envelope：`{ok, identity, data: {...}, ...}`。正文按交付方式出现在 `content` 或 `content_file`；以下字段均位于 `data`：
 
 - `data.content`：内联 Markdown 内容；超大正文自动落盘时可能不返回
-- `data.content_file` / `data.content_preview`：`--full` 的超大正文自动落盘时，完整内容位于 `data.content_file.path`，`content_preview` 仅用于确认内容
+- `data.content_file` / `data.content_preview`：完整读取的超大正文自动落盘时，完整内容位于 `data.content_file.path`，`content_preview` 仅用于确认内容
 - `data.content_delivery_hint` / `data.content_inline`：自动落盘不支持或写入失败时正文保持内联，`content_delivery_hint` 给出后续恢复方式
 - `data.resource`：`{type, title, url, token, selector, update_time, create_time, source, note_id, note_doc_token, verbatim_doc_token}`
   - `selector`：URL 里的 `?sheet=` / `?table=` / `?view=` 透传过来
@@ -75,8 +76,8 @@ lark-cli drive +fetch --url "https://xxx.feishu.cn/wiki/wikcnxxx?table=tblXXX"
 ## 内容读取的边界（拿不全时怎么办）
 
 - **表格被截断**：GFM 表超过 `--embed-max-rows`（默认 50 行）会截断，尾部写「还有 X 行」。要全量有两种方式——调大 `--embed-max-rows`（设 `0` 拿不截断的 Markdown，适合通读全表）；或改用 `sheets +cells-get` / `base +record-list`（适合精确取数、统计、筛选）。
-- **返回内容分页**：除 Minutes 外，先读默认页；当前内容足够即停止，已命中但需要连续后文时，将 `data.next_page_token` 传给 `--page-token` 续读少量页面。整篇或跨章节覆盖、答案位置未知、需要多轮检索时只执行一次 `--full`；禁止对同一资源重复 `--full`，`--full` 失败或超时再回退分页。若 `data.has_more=true` 但 `data.next_page_token` 为空，视为结果不完整并说明；服务端不分页时首次读取即返回全部内容。
-- **完整内容交付**：`--full` 返回 `data.content_file` 时，后续直接对 `path` 本地 read / search，`content_preview` 不能替代完整正文，也不要再次 fetch 同一资源。若出现 `data.content_delivery_hint`，正文保持内联；当前内容足够时直接使用，不足时按 hint 优先在本地重定向，只有无法使用 shell 重定向时才用 `--page-token` 分页。
+- **完整内容交付**：默认读取返回 `data.content_file` 时，直接对 `path` 本地 read / search；`content_preview` 不能替代完整正文，也不要再次 fetch 同一资源。出现 `data.content_delivery_hint` 时按 hint 恢复，不要把可能截断的内联内容当作完整正文。
+- **分页恢复**：Doc / Docx / File 只有明确需要限量读取，或完整读取失败、超时时才使用 `--paginate` / `--page-size`；后续将 `data.next_page_token` 传给 `--page-token`。若 `data.has_more=true` 但 `data.next_page_token` 为空，说明结果不完整并停止，不要静默宣称已覆盖全文。
 - **File 读取回退**：`drive +fetch` 返回的正文足够回答时直接使用；正文不足且需要原始文件字节时用 `drive +download`，需要核对 PDF / HTML / 图片等预览版式时用 `drive +preview`。
 - **提纲 / 清单 / 跨章节总结**：先从目录或同级标题列出覆盖清单；最终答案必须让每个清单项都有明确对应，交付前逐项核对。可以合并表述，但不得静默省略；确实没有相关内容时明确说明。
 - **docx 内嵌的电子表格**：默认就展开成 GFM 表（受 `--embed-max-rows` 截断，截断行为同正文表）。

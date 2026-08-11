@@ -13,7 +13,6 @@ import (
 
 	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/shortcuts/common"
-	"github.com/larksuite/cli/shortcuts/common/contentread"
 )
 
 const (
@@ -36,11 +35,54 @@ func v2FetchFlags() []common.Flag {
 		{Name: "context-after", Desc: "range/keyword/section context: sibling blocks after selected top-level blocks", Type: "int", Default: "0"},
 		{Name: "max-depth", Desc: "outline heading level cap; other scopes subtree depth where -1 is unlimited and 0 is block only", Type: "int", Default: "-1"},
 		// Whole-document Markdown pagination with block anchors.
-		{Name: "full", Type: "bool", Default: "false", Desc: "markdown whole-doc only: return the whole document in one response (disable auto-pagination)"},
-		{Name: "page-token", Desc: "markdown whole-doc only: continue a paginated read from a prior next_page_token"},
-		{Name: "page-size", Type: "int", Default: "0", Desc: "markdown whole-doc only: per-page token budget hint (0 = server default)"},
+		{Name: "full", Type: "bool", Default: "true", Desc: "markdown whole-doc only: return complete content; retained for compatibility"},
+		{Name: "paginate", Type: "bool", Default: "false", Desc: "markdown whole-doc only: request one bounded page instead of the default complete read"},
+		{Name: "page-token", Desc: "markdown whole-doc only: continue from a prior next_page_token (implies pagination)"},
+		{Name: "page-size", Type: "int", Default: "0", Desc: "markdown whole-doc only: per-page token budget hint (implies pagination; 0 = server default)"},
 		{Name: "embed-max-rows", Type: "int", Default: "50", Desc: "markdown only: cap each rendered table to N data rows (0 = no limit)"},
 	}
+}
+
+type docsFetchReadMode uint8
+
+const (
+	docsFetchReadModeFull docsFetchReadMode = iota
+	docsFetchReadModePaginated
+)
+
+func resolveDocsFetchReadMode(runtime *common.RuntimeContext) docsFetchReadMode {
+	if docsFetchPaginationRequested(runtime) {
+		return docsFetchReadModePaginated
+	}
+	return docsFetchReadModeFull
+}
+
+func (m docsFetchReadMode) full() bool {
+	return m == docsFetchReadModeFull
+}
+
+func docsFetchPaginationRequested(runtime *common.RuntimeContext) bool {
+	return runtime.Changed("page-token") ||
+		runtime.Changed("page-size") ||
+		(runtime.Changed("paginate") && runtime.Bool("paginate")) ||
+		(runtime.Changed("full") && !runtime.Bool("full"))
+}
+
+func firstExplicitDocsFetchReadFlag(runtime *common.RuntimeContext) string {
+	for _, name := range []string{"full", "paginate", "page-token", "page-size"} {
+		if runtime.Changed(name) {
+			return "--" + name
+		}
+	}
+	return ""
+}
+
+func isWholeDocumentMarkdownRead(runtime *common.RuntimeContext) bool {
+	return runtime.Str("doc-format") == "markdown" && effectiveFetchReadMode(runtime) == "full"
+}
+
+func docsFetchSpillOversized(runtime *common.RuntimeContext) bool {
+	return useAnchoredMarkdownRead(runtime) && resolveDocsFetchReadMode(runtime).full()
 }
 
 // validateFetchV2 is the Validate hook for the v2 fetch path. It runs before
@@ -59,17 +101,17 @@ func validateFetchV2(_ context.Context, runtime *common.RuntimeContext) error {
 	if err := validateReadModeFlags(runtime); err != nil {
 		return err
 	}
-	return validatePaginatedReadFlags(runtime)
+	return validateMarkdownReadModeFlags(runtime)
 }
 
-// useAnchoredMarkdownRead reports whether the whole-document Markdown read uses the
-// paginated anchored-Markdown path instead of the document API. Only Markdown +
+// useAnchoredMarkdownRead reports whether the whole-document Markdown read uses
+// the anchored-Markdown path instead of the document API. Only Markdown +
 // scope=full qualifies; XML, partial scopes, and im-markdown use the document API.
 func useAnchoredMarkdownRead(runtime *common.RuntimeContext) bool {
 	if runtime.Str("doc-format") != "markdown" || effectiveFetchReadMode(runtime) != "full" {
 		return false
 	}
-	// The paginated Markdown API has no field for a historical revision or a cite
+	// The anchored Markdown API has no field for a historical revision or a cite
 	// language, so it would silently return the latest revision / default
 	// language. Route to the document API (which honors both) when
 	// either is explicitly requested, instead of silently dropping the user's intent.
@@ -79,24 +121,38 @@ func useAnchoredMarkdownRead(runtime *common.RuntimeContext) bool {
 	return true
 }
 
-// validatePaginatedReadFlags checks the paginated-read flags (--full/--page-token/
-// --page-size) apply only to the markdown whole-doc path.
-func validatePaginatedReadFlags(runtime *common.RuntimeContext) error {
-	if runtime.Bool("full") && (strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0) {
-		return common.ValidationErrorf("--full cannot be combined with --page-token/--page-size").WithParam("--full")
+// validateMarkdownReadModeFlags checks explicit complete/paginated read flags
+// apply only to the Markdown whole-document path.
+func validateMarkdownReadModeFlags(runtime *common.RuntimeContext) error {
+	if runtime.Changed("page-token") && strings.TrimSpace(runtime.Str("page-token")) == "" {
+		return common.ValidationErrorf("--page-token cannot be empty").
+			WithParam("--page-token").
+			WithHint("omit --page-token for the default complete read, or use --paginate to request the first page")
 	}
-	usePaginatedRead := useAnchoredMarkdownRead(runtime)
-	pagination := runtime.Bool("full") || strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0
-	if pagination && !usePaginatedRead {
-		// Markdown + full would otherwise enable the paginated read; if it is off here,
-		// a historical revision or an explicit --lang forced the document API path, so
-		// the pagination-only flags conflict with those (not with format/scope).
-		if runtime.Str("doc-format") == "markdown" && effectiveFetchReadMode(runtime) == "full" {
-			return common.ValidationErrorf("--full/--page-token/--page-size are not supported together with a historical --revision-id (or an explicit --lang), which use the document API path").WithParam("--full")
+	if flag := firstExplicitDocsFetchReadFlag(runtime); flag != "" && !useAnchoredMarkdownRead(runtime) {
+		// Historical revisions and explicit language use the document API, which
+		// has no pagination fields. The implicit default complete read is fine,
+		// but explicit read-mode flags must not be silently ignored.
+		if isWholeDocumentMarkdownRead(runtime) {
+			return common.ValidationErrorf("--full/--paginate/--page-token/--page-size are not supported together with a historical --revision-id (or an explicit --lang), which use the document API path").WithParam(flag)
 		}
-		return common.ValidationErrorf("--full/--page-token/--page-size only apply to --doc-format markdown with --scope full").WithParam("--full")
+		return common.ValidationErrorf("--full/--paginate/--page-token/--page-size only apply to --doc-format markdown with --scope full").WithParam(flag)
+	}
+	explicitComplete := (runtime.Changed("full") && runtime.Bool("full")) ||
+		(runtime.Changed("paginate") && !runtime.Bool("paginate"))
+	if explicitComplete && docsFetchPaginationRequested(runtime) {
+		return common.ValidationErrorf("explicit complete-read flags conflict with --paginate/--page-token/--page-size").
+			WithParam(firstConflictingDocsFetchReadFlag(runtime)).
+			WithHint("omit read-mode flags for the default complete read, or use only pagination flags for a bounded read")
 	}
 	return nil
+}
+
+func firstConflictingDocsFetchReadFlag(runtime *common.RuntimeContext) string {
+	if runtime.Changed("paginate") && !runtime.Bool("paginate") {
+		return "--paginate"
+	}
+	return "--full"
 }
 
 func dryRunFetchV2(_ context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
@@ -122,10 +178,11 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 	}
 	diagnoseWikiType := newWikiFetchTypeGuard(runtime, ref, resolution.WikiProbeAttempted, resolution.WikiNode)
 
-	// Whole-document Markdown reads try the paginated Markdown endpoint first.
-	// A first-page failure falls back to the document-fetch API, preserving the
-	// behavior available before the paginated path was introduced.
+	// Whole-document Markdown reads try the anchored Markdown endpoint first.
+	// Only a complete-read failure may fall back to the complete document API;
+	// explicit pagination must never silently return the whole document.
 	if useAnchoredMarkdownRead(runtime) {
+		readMode := resolveDocsFetchReadMode(runtime)
 		handled, fetchErr := runAnchoredMarkdownFetch(ctx, runtime, resolution.URL)
 		if handled {
 			return fetchErr
@@ -133,8 +190,7 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 		if redirectErr := diagnoseWikiType(fetchErr); redirectErr != nil {
 			return redirectErr
 		}
-		continuation := contentread.IsPageContinuation(strings.TrimSpace(runtime.Str("page-token")))
-		if handled, err := handlePaginatedReadFailure(runtime, continuation, fetchErr); handled || err != nil {
+		if handled, err := handleAnchoredMarkdownReadFailure(runtime, readMode, fetchErr); handled || err != nil {
 			return err
 		}
 	}
@@ -169,7 +225,14 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 		runtime.OutFormatRaw(data, nil, nil)
 		return nil
 	}
-	delivery, scan, err := common.PrepareFetchContentDelivery(runtime, data, content, docsFetchContentJQPath)
+	delivery, scan, err := common.PrepareFetchContentDelivery(
+		runtime,
+		data,
+		content,
+		docsFetchContentJQPath,
+		docsFetchSpillOversized(runtime),
+		"rerun with `--paginate`, then follow each returned `next_page_token` with `--page-token`",
+	)
 	if err != nil {
 		return err
 	}

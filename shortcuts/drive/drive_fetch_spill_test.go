@@ -18,7 +18,22 @@ import (
 	"github.com/larksuite/cli/shortcuts/common"
 )
 
-const driveFetchFallbackHint = "Content remains inline because temporary-file delivery failed and may be truncated. If incomplete, rerun locally with --full --jq '.data.content' and redirect stdout to a new file; use --page-token only when shell redirection is unavailable."
+const driveFetchFallbackHint = "Content remains inline because temporary-file delivery failed and may be truncated. If incomplete, rerun locally with --full --jq '.data.content' and redirect stdout to a new file; if shell redirection is unavailable, rerun with `--paginate`, then follow each returned `next_page_token` with `--page-token`."
+
+func TestDriveFetchPaginationRecoveryMatchesEntityCapabilities(t *testing.T) {
+	fileHint := driveFetchPaginationRecovery("file")
+	if !strings.Contains(fileHint, "--paginate") {
+		t.Fatalf("file recovery = %q, want bounded pagination", fileHint)
+	}
+	sheetHint := driveFetchPaginationRecovery("sheet")
+	if strings.Contains(sheetHint, "--paginate") || !strings.Contains(sheetHint, "sheets +cells-get") {
+		t.Fatalf("sheet recovery = %q, want structured ranges without a false pagination promise", sheetHint)
+	}
+	baseHint := driveFetchPaginationRecovery("bitable")
+	if strings.Contains(baseHint, "--paginate") || !strings.Contains(baseHint, "base +record-list") {
+		t.Fatalf("base recovery = %q, want structured records without a false pagination promise", baseHint)
+	}
+}
 
 func TestEmitDriveFetchFullOversizeSpillsJSON(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONTENT_SAFETY_MODE", "off")
@@ -28,8 +43,9 @@ func TestEmitDriveFetchFullOversizeSpillsJSON(t *testing.T) {
 	runtime, stdout, stderr := newDriveSpillRuntime(t, "", true)
 
 	err := emitDriveFetch(runtime, &driveFetchOutput{
-		content:  content,
-		warnings: []string{"kept warning"},
+		content:        content,
+		warnings:       []string{"kept warning"},
+		spillOversized: true,
 	}, fetchResource{Type: "file", Token: "boxcnSpill"})
 	if err != nil {
 		t.Fatalf("emitDriveFetch() error = %v", err)
@@ -78,7 +94,7 @@ func TestEmitDriveFetchFullOversizeSpillsPretty(t *testing.T) {
 	content := strings.Repeat("do not print this whole body\n", 1200)
 	runtime, stdout, stderr := newDriveSpillRuntime(t, "pretty", true)
 
-	if err := emitDriveFetch(runtime, &driveFetchOutput{content: content}, fetchResource{Type: "file"}); err != nil {
+	if err := emitDriveFetch(runtime, &driveFetchOutput{content: content, spillOversized: true}, fetchResource{Type: "file"}); err != nil {
 		t.Fatalf("emitDriveFetch() error = %v", err)
 	}
 	got := stdout.String()
@@ -94,6 +110,28 @@ func TestEmitDriveFetchFullOversizeSpillsPretty(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("successful pretty spill wrote stderr: %q", stderr.String())
+	}
+}
+
+func TestEmitDriveFetchOversizeRequiresSpillEligibility(t *testing.T) {
+	t.Setenv("LARKSUITE_CLI_CONTENT_SAFETY_MODE", "off")
+	t.Setenv("TMPDIR", t.TempDir())
+	content := strings.Repeat("paginated or native content\n", 1200)
+	runtime, stdout, _ := newDriveSpillRuntime(t, "", true)
+
+	if err := emitDriveFetch(runtime, &driveFetchOutput{content: content, spillOversized: false}, fetchResource{Type: "minutes"}); err != nil {
+		t.Fatalf("emitDriveFetch() error = %v", err)
+	}
+	var envelope map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	data := envelope["data"].(map[string]interface{})
+	if data["content"] != content {
+		t.Fatalf("ineligible oversized output lost inline content")
+	}
+	if _, ok := data["content_file"]; ok {
+		t.Fatal("ineligible oversized output was spilled because the runtime --full default was true")
 	}
 }
 

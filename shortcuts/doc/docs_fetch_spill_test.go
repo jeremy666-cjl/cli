@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/httpmock"
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/larksuite/cli/shortcuts/common/contentread"
 )
 
-func TestDocsFetchFullAnchoredMarkdownOversizeSpills(t *testing.T) {
+func TestDocsFetchDefaultFullAnchoredMarkdownOversizeSpills(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 	t.Setenv("LARKSUITE_CLI_CONTENT_SAFETY_MODE", "off")
 	t.Setenv("TMPDIR", t.TempDir())
@@ -40,7 +41,6 @@ func TestDocsFetchFullAnchoredMarkdownOversizeSpills(t *testing.T) {
 		"+fetch",
 		"--doc", "https://example.feishu.cn/docx/doxcnAnchoredSpill",
 		"--doc-format", "markdown",
-		"--full",
 		"--as", "bot",
 	}, f, stdout)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestDocsFetchFullAnchoredMarkdownOversizeSpills(t *testing.T) {
 	assertDocsSpillFile(t, document, wantContent)
 }
 
-func TestDocsFetchFullDocumentAPIFallbackReturnsInlineContent(t *testing.T) {
+func TestDocsFetchDefaultFullDocumentAPIFallbackReturnsInlineContent(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 	t.Setenv("LARKSUITE_CLI_CONTENT_SAFETY_MODE", "off")
 	const wantContent = "document API fallback content\n"
@@ -86,7 +86,6 @@ func TestDocsFetchFullDocumentAPIFallbackReturnsInlineContent(t *testing.T) {
 		"+fetch",
 		"--doc", "https://example.feishu.cn/docx/doxcnNativeFallback",
 		"--doc-format", "markdown",
-		"--full",
 		"--as", "bot",
 	}, f, stdout)
 	if err != nil {
@@ -101,6 +100,51 @@ func TestDocsFetchFullDocumentAPIFallbackReturnsInlineContent(t *testing.T) {
 	}
 	if len(primaryStub.CapturedBodies) != 1 || len(fallbackStub.CapturedBodies) != 1 {
 		t.Fatalf("calls: primary=%d fallback=%d, want one each", len(primaryStub.CapturedBodies), len(fallbackStub.CapturedBodies))
+	}
+}
+
+func TestDocsFetchPaginatedFirstPageFailureDoesNotUseCompleteFallback(t *testing.T) {
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
+
+	f, stdout, _, reg := cmdutil.TestFactory(t, docsTestConfigWithAppID("docs-fetch-page-no-full-fallback"))
+	reg.Register(&httpmock.Stub{
+		Method: "POST",
+		URL:    contentread.Path,
+		Body: map[string]interface{}{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]interface{}{"full_content": ""},
+		},
+	})
+	fallbackStub := &httpmock.Stub{
+		Method:   "POST",
+		URL:      "/open-apis/docs_ai/v1/documents/doxcnPaged/fetch",
+		Optional: true,
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"document": map[string]interface{}{"content": "# complete fallback"},
+			},
+		},
+	}
+	reg.Register(fallbackStub)
+
+	err := mountAndRunDocs(t, DocsFetch, []string{
+		"+fetch",
+		"--doc", "https://example.feishu.cn/docx/doxcnPaged",
+		"--doc-format", "markdown",
+		"--paginate",
+		"--as", "bot",
+	}, f, stdout)
+	if err == nil {
+		t.Fatal("paginated content-read failure returned nil")
+	}
+	if got := len(fallbackStub.CapturedBodies); got != 0 {
+		t.Fatalf("complete document API fallback calls = %d, want 0", got)
+	}
+	problem, ok := errs.ProblemOf(err)
+	if !ok || !strings.Contains(problem.Hint, "--paginate") || !strings.Contains(problem.Hint, "omit pagination flags") {
+		t.Fatalf("error = %#v, want paginated retry/complete-read recovery hint", err)
 	}
 }
 
@@ -125,11 +169,11 @@ func TestApplyFetchContentDeliveryAddsInlineFallbackHint(t *testing.T) {
 	data := map[string]interface{}{"document": map[string]interface{}{"content": "body"}}
 	applyFetchContentDelivery(data, common.FetchContentDelivery{
 		Content:    "body",
-		InlineHint: "retry without --full",
+		InlineHint: "retry with --paginate",
 	})
 
 	document := data["document"].(map[string]interface{})
-	if data["content_delivery_hint"] != "retry without --full" || document["content_inline"] != true {
+	if data["content_delivery_hint"] != "retry with --paginate" || document["content_inline"] != true {
 		t.Fatalf("data = %#v, want inline fallback metadata", data)
 	}
 	if document["content"] != "body" {

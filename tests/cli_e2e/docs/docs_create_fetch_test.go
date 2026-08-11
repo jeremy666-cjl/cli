@@ -41,7 +41,7 @@ func TestDocs_CreateAndFetchWorkflowAsBot(t *testing.T) {
 		docToken = createDocWithRetry(t, parentT, ctx, folderToken, docTitle, docContent, defaultAs)
 	})
 
-	t.Run("fetch", func(t *testing.T) {
+	t.Run("fetch paginated", func(t *testing.T) {
 		require.NotEmpty(t, docToken, "document token should be created before fetch")
 
 		result, err := clie2e.RunCmd(ctx, clie2e.Request{
@@ -49,6 +49,7 @@ func TestDocs_CreateAndFetchWorkflowAsBot(t *testing.T) {
 				"docs", "+fetch",
 				"--doc", docToken,
 				"--doc-format", "markdown",
+				"--paginate",
 			},
 			DefaultAs: defaultAs,
 		})
@@ -60,7 +61,7 @@ func TestDocs_CreateAndFetchWorkflowAsBot(t *testing.T) {
 		assert.Contains(t, content, "This document was created by lark-cli e2e test.")
 	})
 
-	t.Run("fetch full with automatic spill", func(t *testing.T) {
+	t.Run("fetch default complete with automatic spill", func(t *testing.T) {
 		require.NotEmpty(t, docToken, "document token should be created before fetch")
 		t.Setenv("TMPDIR", t.TempDir())
 
@@ -69,7 +70,6 @@ func TestDocs_CreateAndFetchWorkflowAsBot(t *testing.T) {
 				"docs", "+fetch",
 				"--doc", docToken,
 				"--doc-format", "markdown",
-				"--full",
 			},
 			DefaultAs: defaultAs,
 		})

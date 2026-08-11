@@ -79,6 +79,32 @@ func TestDriveFetchDryRun_FileURL(t *testing.T) {
 	require.Equal(t, "file", gjson.Get(result.Stdout, "data.type").String())
 }
 
+func TestDriveFetchDryRun_DefaultsToFull(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{name: "docx", url: "https://xxx.feishu.cn/docx/doxcnDefaultFull"},
+		{name: "sheet", url: "https://xxx.feishu.cn/sheets/shtcnDefaultFull"},
+		{name: "file", url: "https://xxx.feishu.cn/file/boxcnDefaultFull"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setDriveFetchE2EEnv(t)
+			result := runFetchDryRun(t, "--url", tt.url, "--dry-run")
+			result.AssertExitCode(t, 0)
+
+			body := gjson.Get(result.Stdout, "data.api.0.body")
+			require.False(t, body.Get("enable_pagination").Exists(),
+				"default read must request complete content, stdout:\n%s", result.Stdout)
+			require.False(t, body.Get("page_token").Exists(),
+				"default read must not send a page token, stdout:\n%s", result.Stdout)
+			require.False(t, body.Get("page_size").Exists(),
+				"default read must not send a page size, stdout:\n%s", result.Stdout)
+		})
+	}
+}
+
 func TestDriveFetchDryRun_MinutesURL(t *testing.T) {
 	setDriveFetchE2EEnv(t)
 	const token = "obcnMinFetchE2E"
@@ -174,6 +200,14 @@ func TestDriveFetchValidation_InvalidPageSize(t *testing.T) {
 	}
 }
 
+func TestDriveFetchValidation_EmptyPageToken(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnPage", "--page-token", "   ", "--dry-run")
+	result.AssertExitCode(t, 2)
+	require.Contains(t, result.Stderr, "--page-token cannot be empty")
+	require.Contains(t, result.Stderr, "--paginate")
+}
+
 func TestDriveFetchValidation_MinutesRequiresUser(t *testing.T) {
 	setDriveFetchE2EEnv(t)
 	result := runFetchDryRun(t, "--url", "https://meetings.feishu.cn/minutes/obcnUserOnly", "--dry-run")
@@ -206,7 +240,52 @@ func TestDriveFetchValidation_IncludeOnDocx(t *testing.T) {
 		"--include should be rejected on a docx, stderr:\n%s", result.Stderr)
 }
 
-// --- Flag forwarding (doc pagination / --full / minutes --include) + ?table= ---
+// --- Flag forwarding (explicit pagination / --full / minutes --include) + ?table= ---
+
+func TestDriveFetchDryRun_PaginateRequestsFirstPage(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnPage", "--paginate", "--dry-run")
+	result.AssertExitCode(t, 0)
+
+	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
+		"--paginate should request a bounded first page for files, stdout:\n%s", result.Stdout)
+	require.False(t, gjson.Get(result.Stdout, "data.api.0.body.page_token").Exists(),
+		"first-page pagination should not send a continuation token, stdout:\n%s", result.Stdout)
+}
+
+func TestDriveFetchDryRun_PageSizeZeroRequestsServerDefaultPage(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnPage", "--page-size", "0", "--dry-run")
+	result.AssertExitCode(t, 0)
+
+	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
+		"an explicit --page-size=0 should request pagination with the server default size, stdout:\n%s", result.Stdout)
+	require.False(t, gjson.Get(result.Stdout, "data.api.0.body.page_size").Exists(),
+		"zero page size should be omitted from the wire body, stdout:\n%s", result.Stdout)
+}
+
+func TestDriveFetchDryRun_FullFalseRequestsPagination(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t, "--url", "https://xxx.feishu.cn/file/boxcnPage", "--full=false", "--dry-run")
+	result.AssertExitCode(t, 0)
+
+	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
+		"--full=false should preserve the compatibility path to pagination, stdout:\n%s", result.Stdout)
+}
+
+func TestDriveFetchValidation_ConflictingExplicitReadModeBooleans(t *testing.T) {
+	setDriveFetchE2EEnv(t)
+	result := runFetchDryRun(t,
+		"--url", "https://xxx.feishu.cn/file/boxcnPage",
+		"--full=false",
+		"--paginate=false",
+		"--dry-run",
+	)
+	result.AssertExitCode(t, 2)
+	require.Contains(t, result.Stderr, "conflicts with",
+		"opposing explicit read modes must not silently pick one, stderr:\n%s", result.Stderr)
+	require.Contains(t, result.Stderr, "--paginate")
+}
 
 func TestDriveFetchDryRun_DocxPaginationFlags(t *testing.T) {
 	setDriveFetchE2EEnv(t)
@@ -215,13 +294,15 @@ func TestDriveFetchDryRun_DocxPaginationFlags(t *testing.T) {
 	result.AssertExitCode(t, 0)
 
 	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
-		"document read should enable pagination when --full is absent, stdout:\n%s", result.Stdout)
+		"document read should enable pagination when page flags are explicit, stdout:\n%s", result.Stdout)
 	require.Equal(t, "tok", gjson.Get(result.Stdout, "data.api.0.body.page_token").String(),
 		"--page-token should forward into the body, stdout:\n%s", result.Stdout)
 	require.Equal(t, int64(5), gjson.Get(result.Stdout, "data.api.0.body.page_size").Int(),
 		"--page-size should forward into the body, stdout:\n%s", result.Stdout)
 	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.with_block_id").Bool(),
 		"document read should request block-id anchors, stdout:\n%s", result.Stdout)
+	require.Equal(t, int64(1), gjson.Get(result.Stdout, "data.api.#").Int(),
+		"paginated document reads must not advertise the complete-content fallback, stdout:\n%s", result.Stdout)
 }
 
 func TestDriveFetchDryRun_DocxFullDisablesPagination(t *testing.T) {
@@ -242,7 +323,7 @@ func TestDriveFetchDryRun_FilePaginationFlags(t *testing.T) {
 	result.AssertExitCode(t, 0)
 
 	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
-		"file read should enable pagination when --full is absent, stdout:\n%s", result.Stdout)
+		"file read should enable pagination when page flags are explicit, stdout:\n%s", result.Stdout)
 	require.Equal(t, "tok", gjson.Get(result.Stdout, "data.api.0.body.page_token").String(),
 		"--page-token should forward into the body, stdout:\n%s", result.Stdout)
 	require.Equal(t, int64(5), gjson.Get(result.Stdout, "data.api.0.body.page_size").Int(),
@@ -268,7 +349,7 @@ func TestDriveFetchDryRun_SheetPaginationFlags(t *testing.T) {
 		"--page-token", "tok", "--page-size", "5", "--dry-run")
 	result.AssertExitCode(t, 0)
 	require.True(t, gjson.Get(result.Stdout, "data.api.0.body.enable_pagination").Bool(),
-		"sheet read should request pagination when --full is absent, stdout:\n%s", result.Stdout)
+		"sheet read should request pagination when page flags are explicit, stdout:\n%s", result.Stdout)
 	require.Equal(t, "tok", gjson.Get(result.Stdout, "data.api.0.body.page_token").String(),
 		"--page-token should forward into the body, stdout:\n%s", result.Stdout)
 	require.Equal(t, int64(5), gjson.Get(result.Stdout, "data.api.0.body.page_size").Int(),
@@ -282,6 +363,28 @@ func TestDriveFetchDryRun_FileFullAndPageTokenRejected(t *testing.T) {
 	result.AssertExitCode(t, 2)
 	require.Contains(t, result.Stderr, "cannot be combined",
 		"--full + --page-token should be rejected on file, stderr:\n%s", result.Stderr)
+}
+
+func TestDriveFetchDryRun_MinutesRejectsExplicitReadModeFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "full", args: []string{"--full"}},
+		{name: "paginate", args: []string{"--paginate"}},
+		{name: "page size", args: []string{"--page-size", "0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setDriveFetchE2EEnv(t)
+			args := []string{"--url", "https://meetings.feishu.cn/minutes/obcnNoPaging", "--as", "user"}
+			args = append(args, tt.args...)
+			args = append(args, "--dry-run")
+			result := runFetchDryRun(t, args...)
+			result.AssertExitCode(t, 2)
+			require.Contains(t, result.Stderr, "do not apply to minutes")
+		})
+	}
 }
 
 func TestDriveFetchDryRun_MinutesIncludeForwarded(t *testing.T) {

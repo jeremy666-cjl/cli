@@ -16,7 +16,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestDrive_FetchFullAutomaticSpillWorkflow(t *testing.T) {
+func TestDrive_FetchDefaultFullAutomaticSpillWorkflow(t *testing.T) {
 	clie2e.SkipWithoutTenantAccessToken(t)
 	t.Setenv("LARKSUITE_CLI_CONTENT_SAFETY_MODE", "off")
 	t.Setenv("TMPDIR", t.TempDir())
@@ -31,7 +31,7 @@ func TestDrive_FetchFullAutomaticSpillWorkflow(t *testing.T) {
 	docToken := createDriveFetchWorkflowDoc(t, ctx, folderToken, content)
 
 	result, err := clie2e.RunCmd(ctx, clie2e.Request{
-		Args:      []string{"drive", "+fetch", "--token", docToken, "--type", "docx", "--full"},
+		Args:      []string{"drive", "+fetch", "--token", docToken, "--type", "docx"},
 		DefaultAs: "bot",
 	})
 	require.NoError(t, err)

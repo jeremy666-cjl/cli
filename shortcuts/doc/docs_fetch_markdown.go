@@ -16,8 +16,8 @@ import (
 )
 
 // FetchDocumentMarkdown reads a document as plain Markdown through the document
-// fetch API. It is the fallback when the paginated anchored-Markdown path is
-// unavailable on the first page.
+// fetch API. It is the fallback when a complete anchored-Markdown read is
+// unavailable.
 func FetchDocumentMarkdown(runtime *common.RuntimeContext, docToken string) (content string, err error) {
 	apiPath := fmt.Sprintf("/open-apis/docs_ai/v1/documents/%s/fetch", docToken)
 	body := map[string]interface{}{"format": "markdown"}
@@ -32,7 +32,7 @@ func FetchDocumentMarkdown(runtime *common.RuntimeContext, docToken string) (con
 	return content, nil
 }
 
-// resolvedFetchURL is the URL forwarded to the paginated read on the Execute path:
+// resolvedFetchURL is the URL forwarded to the anchored Markdown read:
 // a bare token is resolved via a wiki probe, a real URL is forwarded verbatim.
 func resolvedFetchURL(runtime *common.RuntimeContext) common.FetchURLResolution {
 	return common.ResolveFetchURLDetailed(runtime, "docx", strings.TrimSpace(runtime.Str("doc")))
@@ -44,11 +44,9 @@ func typedFetchURL(runtime *common.RuntimeContext) string {
 	return common.ResourceURLOrBuild(runtime.Config.Brand, "docx", strings.TrimSpace(runtime.Str("doc")))
 }
 
-// pageContinuationFailed preserves a typed upstream error and adds the
-// continuation-specific recovery step. Untyped render failures are malformed
-// response errors, not server errors.
-func pageContinuationFailed(cause error) error {
-	const hint = "the cursor may have expired because the document changed; re-run without --page-token to read from the start"
+// withPaginatedMarkdownHint preserves typed metadata while adding actionable
+// recovery. Untyped render failures remain malformed-response errors.
+func withPaginatedMarkdownHint(cause error, hint string) error {
 	if problem, ok := errs.ProblemOf(cause); ok {
 		if problem.Hint == "" {
 			problem.Hint = hint
@@ -58,24 +56,37 @@ func pageContinuationFailed(cause error) error {
 		return cause
 	}
 	return errs.NewInternalError(errs.SubtypeInvalidResponse,
-		"could not decode the continuation page: %v", cause).
+		"could not read paginated Markdown: %v", cause).
 		WithHint(hint).
 		WithCause(cause)
 }
 
-// handlePaginatedReadFailure falls back on the first page but surfaces a
-// continuation error because the document API cannot honor a cursor.
-func handlePaginatedReadFailure(runtime *common.RuntimeContext, continuation bool, cause error) (bool, error) {
-	if continuation {
-		return true, pageContinuationFailed(cause)
+func paginatedMarkdownReadFailed(runtime *common.RuntimeContext, cause error) error {
+	if errs.IsPermission(cause) {
+		return withPaginatedMarkdownHint(cause,
+			"confirm you have read access to this document, or ask its owner to share it (changing pagination cannot bypass the denial)")
+	}
+	if contentread.IsPageContinuation(runtime.Str("page-token")) {
+		return withPaginatedMarkdownHint(cause,
+			"the cursor may have expired because the document changed; re-run with `--paginate` and omit `--page-token` to read from the start")
+	}
+	return withPaginatedMarkdownHint(cause,
+		"retry with `--paginate`, or omit pagination flags (including `--full=false`) to allow a complete read")
+}
+
+// handleAnchoredMarkdownReadFailure only falls back when the requested mode
+// was complete because the document API cannot honor pagination.
+func handleAnchoredMarkdownReadFailure(runtime *common.RuntimeContext, readMode docsFetchReadMode, cause error) (bool, error) {
+	if readMode == docsFetchReadModePaginated {
+		return true, paginatedMarkdownReadFailed(runtime, cause)
 	}
 	fmt.Fprintf(runtime.IO().ErrOut,
-		"[fetch] paginated Markdown read unavailable (%v); falling back to the document API\n", cause)
+		"[fetch] complete Markdown read unavailable (%v); falling back to the document API\n", cause)
 	return false, nil
 }
 
-// emitPaginatedMarkdown emits Markdown and pagination metadata. Oversized
-// --full reads may replace inline content with a local file descriptor.
+// emitPaginatedMarkdown emits anchored Markdown and optional pagination
+// metadata. Oversized complete reads may use local temporary-file delivery.
 func emitPaginatedMarkdown(runtime *common.RuntimeContext, content, title string, updateTime int64, hasMore bool, nextPageToken string, hints []string) error {
 	nextPageToken = strings.TrimSpace(nextPageToken)
 	data := map[string]interface{}{
@@ -106,7 +117,14 @@ func emitPaginatedMarkdown(runtime *common.RuntimeContext, content, title string
 	if warning := addFetchDetailDowngradeWarning(runtime, data); warning != "" && runtime.Format == "pretty" {
 		fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", warning)
 	}
-	delivery, scan, err := common.PrepareFetchContentDelivery(runtime, data, content, docsFetchContentJQPath)
+	delivery, scan, err := common.PrepareFetchContentDelivery(
+		runtime,
+		data,
+		content,
+		docsFetchContentJQPath,
+		resolveDocsFetchReadMode(runtime).full(),
+		"rerun with `--paginate`, then follow each returned `next_page_token` with `--page-token`",
+	)
 	if err != nil {
 		return err
 	}
@@ -148,13 +166,14 @@ func applyFetchContentDelivery(data map[string]interface{}, delivery common.Fetc
 	document["content_preview"] = delivery.Preview
 }
 
-// runAnchoredMarkdownFetch handles whole-document Markdown with pagination and
-// block anchors. It returns the raw failure to executeFetchV2 so a Wiki input
-// can be diagnosed before the document API fallback is emitted.
+// runAnchoredMarkdownFetch handles complete or paginated whole-document
+// Markdown with block anchors. It returns the raw failure to executeFetchV2 so
+// a Wiki input can be diagnosed before a compatible fallback is considered.
 func runAnchoredMarkdownFetch(ctx context.Context, runtime *common.RuntimeContext, fetchURL string) (handled bool, err error) {
+	readMode := resolveDocsFetchReadMode(runtime)
 	opts := contentread.FetchOptions{
 		MaxRows:   runtime.Int("embed-max-rows"),
-		Full:      runtime.Bool("full"),
+		Full:      readMode.full(),
 		PageToken: strings.TrimSpace(runtime.Str("page-token")),
 		PageSize:  runtime.Int("page-size"),
 	}
@@ -168,14 +187,22 @@ func runAnchoredMarkdownFetch(ctx context.Context, runtime *common.RuntimeContex
 	return true, nil
 }
 
-// dryRunAnchoredMarkdownFetch describes the paginated anchored-Markdown call.
+// dryRunAnchoredMarkdownFetch describes the anchored-Markdown call.
 func dryRunAnchoredMarkdownFetch(runtime *common.RuntimeContext) *common.DryRunAPI {
+	readMode := resolveDocsFetchReadMode(runtime)
 	body := contentread.NewRequest(typedFetchURL(runtime))
 	body.WithBlockID = true
-	contentread.ApplyPagination(&body, runtime.Bool("full"), runtime.Str("page-token"), runtime.Int("page-size"))
+	contentread.ApplyPagination(&body, readMode.full(), runtime.Str("page-token"), runtime.Int("page-size"))
 	return common.NewDryRunAPI().
 		POST(contentread.Path).
-		Desc("fetch document as paginated Markdown with block anchors").
+		Desc("fetch document as "+docsFetchReadModeDescription(readMode)+" Markdown with block anchors").
 		Body(body).
 		Set("embed_max_rows", runtime.Int("embed-max-rows"))
+}
+
+func docsFetchReadModeDescription(readMode docsFetchReadMode) string {
+	if readMode == docsFetchReadModePaginated {
+		return "paginated"
+	}
+	return "complete"
 }

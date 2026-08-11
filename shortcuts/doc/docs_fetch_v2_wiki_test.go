@@ -15,7 +15,7 @@ import (
 	"github.com/larksuite/cli/shortcuts/common/contentread"
 )
 
-func TestPageContinuationFailedPreservesTypedError(t *testing.T) {
+func TestPaginatedMarkdownPermissionFailurePreservesTypedError(t *testing.T) {
 	transportCause := errors.New("transport cause")
 	upstream := errs.NewPermissionError(errs.SubtypeMissingScope, "missing scope").
 		WithMissingScopes("docx:document:readonly").
@@ -23,8 +23,12 @@ func TestPageContinuationFailedPreservesTypedError(t *testing.T) {
 		WithHint("grant document access").
 		WithCause(transportCause)
 	cause := fmt.Errorf("fetch: %w", upstream)
+	runtime := newFetchShortcutTestRuntime(t, "", map[string]string{
+		"doc-format": "markdown",
+		"page-token": "cursor",
+	})
 
-	got := pageContinuationFailed(cause)
+	got := paginatedMarkdownReadFailed(runtime, cause)
 	problem, ok := errs.ProblemOf(got)
 	if !ok || problem.Subtype != errs.SubtypeMissingScope || problem.LogID != "log-1" {
 		t.Fatalf("problem = %#v, want original permission metadata", problem)
@@ -34,8 +38,25 @@ func TestPageContinuationFailedPreservesTypedError(t *testing.T) {
 		permissionErr.MissingScopes[0] != "docx:document:readonly" || !errors.Is(got, transportCause) {
 		t.Fatalf("error lost missing scopes or cause: %#v", got)
 	}
-	if !strings.Contains(problem.Hint, "grant document access") || !strings.Contains(problem.Hint, "without --page-token") {
+	if !strings.Contains(problem.Hint, "grant document access") || !strings.Contains(problem.Hint, "share") {
 		t.Fatalf("error lost cause or recovery hint: %#v", got)
+	}
+	if strings.Contains(problem.Hint, "--paginate") || strings.Contains(problem.Hint, "--page-token") {
+		t.Fatalf("permission error received misleading pagination recovery: %q", problem.Hint)
+	}
+}
+
+func TestPaginatedMarkdownContinuationFailureRecommendsExplicitRestart(t *testing.T) {
+	cause := errs.NewAPIError(errs.SubtypeServerError, "upstream failed")
+	runtime := newFetchShortcutTestRuntime(t, "", map[string]string{
+		"doc-format": "markdown",
+		"page-token": "cursor",
+	})
+
+	got := paginatedMarkdownReadFailed(runtime, cause)
+	problem, ok := errs.ProblemOf(got)
+	if !ok || !strings.Contains(problem.Hint, "--paginate") || !strings.Contains(problem.Hint, "--page-token") {
+		t.Fatalf("error = %#v, want explicit first-page restart guidance", got)
 	}
 }
 

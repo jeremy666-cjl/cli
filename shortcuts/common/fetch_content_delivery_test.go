@@ -31,6 +31,7 @@ type fetchDeliveryTestOptions struct {
 }
 
 const testFetchContentJQPath = ".data.content"
+const testFetchPaginationRecovery = "start a paginated read and follow each returned next_page_token"
 
 func newFetchDeliveryTestRuntime(t *testing.T, opts fetchDeliveryTestOptions) (*RuntimeContext, *cmdutil.Factory) {
 	t.Helper()
@@ -126,7 +127,7 @@ func TestPrepareFetchContentDeliverySpillBoundary(t *testing.T) {
 		content := strings.Repeat("a", FetchContentSpillThreshold)
 		rctx, _ := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
 
-		delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+		delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 		if err != nil {
 			t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 		}
@@ -142,7 +143,7 @@ func TestPrepareFetchContentDeliverySpillBoundary(t *testing.T) {
 		content := strings.Repeat("b", FetchContentSpillThreshold+1)
 		rctx, _ := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
 
-		delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+		delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 		if err != nil {
 			t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 		}
@@ -172,7 +173,7 @@ func TestPrepareFetchContentDeliveryUnicodePreview(t *testing.T) {
 	content := strings.Repeat("界", FetchContentSpillThreshold/len("界")+2)
 	rctx, _ := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
 
-	delivery, _, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+	delivery, _, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 	if err != nil {
 		t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 	}
@@ -204,7 +205,7 @@ func TestPrepareFetchContentDeliveryAutomaticSpillBypasses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rctx, _ := newFetchDeliveryTestRuntime(t, tt.opts)
-			delivery, _, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+			delivery, _, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 			if err != nil {
 				t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 			}
@@ -229,7 +230,7 @@ func TestPrepareFetchContentDeliveryWithoutLocalTempSupportStaysInline(t *testin
 	rctx, factory := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
 	factory.FileIOProvider = fetchDeliveryFileIOProvider{fileIO: fetchDeliveryUnsupportedFileIO{}}
 
-	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 	if err != nil {
 		t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 	}
@@ -254,7 +255,8 @@ func TestPrepareFetchContentDeliveryWithoutLocalTempSupportStaysInline(t *testin
 func fetchDeliveryFallbackHint(contentJQPath string) string {
 	return "Content remains inline because temporary-file delivery failed and may be truncated. " +
 		"If incomplete, rerun locally with --full --jq '" + contentJQPath +
-		"' and redirect stdout to a new file; use --page-token only when shell redirection is unavailable."
+		"' and redirect stdout to a new file; if shell redirection is unavailable, " +
+		testFetchPaginationRecovery + "."
 }
 
 func TestWriteFetchContentPrettyPrintsInlineFallbackHintFirst(t *testing.T) {
@@ -276,7 +278,7 @@ func TestPrepareFetchContentDeliverySafetyBlockCreatesNoFile(t *testing.T) {
 	content := strings.Repeat("blocked", FetchContentSpillThreshold) + tailMarker
 	rctx, _ := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
 
-	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 	if err == nil || !scan.Blocked {
 		t.Fatalf("PrepareFetchContentDelivery() = (%#v, blocked=%t, %v), want content-safety block", delivery, scan.Blocked, err)
 	}
@@ -334,7 +336,7 @@ func TestPrepareFetchContentDeliveryTemporaryFileFailureStaysInline(t *testing.T
 
 	content := strings.Repeat("x", FetchContentSpillThreshold+1)
 	rctx, _ := newFetchDeliveryTestRuntime(t, fetchDeliveryTestOptions{full: true})
-	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath)
+	delivery, scan, err := PrepareFetchContentDelivery(rctx, map[string]any{"content": content}, content, testFetchContentJQPath, rctx.Bool("full"), testFetchPaginationRecovery)
 	if err != nil {
 		t.Fatalf("PrepareFetchContentDelivery() error = %v", err)
 	}

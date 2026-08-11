@@ -16,8 +16,42 @@ import (
 	"github.com/larksuite/cli/shortcuts/minutes"
 )
 
-func hasPaginationFlags(runtime *common.RuntimeContext) bool {
-	return runtime.Bool("full") || strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0
+type driveFetchReadMode uint8
+
+const (
+	driveFetchReadModeFull driveFetchReadMode = iota
+	driveFetchReadModePaginated
+	driveFetchReadModeNative
+)
+
+func resolveDriveFetchReadMode(runtime *common.RuntimeContext, fetchType string) driveFetchReadMode {
+	if fetchType == "minutes" {
+		return driveFetchReadModeNative
+	}
+	if fetchPaginationRequested(runtime) {
+		return driveFetchReadModePaginated
+	}
+	return driveFetchReadModeFull
+}
+
+func (m driveFetchReadMode) full() bool {
+	return m == driveFetchReadModeFull
+}
+
+func fetchPaginationRequested(runtime *common.RuntimeContext) bool {
+	return runtime.Changed("page-token") ||
+		runtime.Changed("page-size") ||
+		(runtime.Changed("paginate") && runtime.Bool("paginate")) ||
+		(runtime.Changed("full") && !runtime.Bool("full"))
+}
+
+func firstExplicitFetchReadFlag(runtime *common.RuntimeContext) string {
+	for _, name := range []string{"full", "paginate", "page-token", "page-size"} {
+		if runtime.Changed(name) {
+			return "--" + name
+		}
+	}
+	return ""
 }
 
 // validateFetchTypeFlags applies type-specific rules before or after Wiki
@@ -28,8 +62,9 @@ func validateFetchTypeFlags(runtime *common.RuntimeContext, fetchType string) er
 			WithParam("--as").
 			WithHint("rerun with `--as user`")
 	}
-	if hasPaginationFlags(runtime) && fetchType == "minutes" {
-		return common.ValidationErrorf("--full/--page-token/--page-size do not apply to minutes (got %s)", fetchType).WithParam("--full")
+	if flag := firstExplicitFetchReadFlag(runtime); flag != "" && fetchType == "minutes" {
+		return common.ValidationErrorf("--full/--paginate/--page-token/--page-size do not apply to minutes (got %s)", fetchType).
+			WithParam(flag)
 	}
 	if strings.TrimSpace(runtime.Str("include")) != "" && fetchType != "minutes" {
 		return common.ValidationErrorf("--include only applies to minutes (got %s)", fetchType).WithParam("--include")
@@ -56,8 +91,19 @@ func validateFetch(_ context.Context, runtime *common.RuntimeContext) error {
 			return err
 		}
 	}
-	if runtime.Bool("full") && (strings.TrimSpace(runtime.Str("page-token")) != "" || runtime.Int("page-size") > 0) {
-		return common.ValidationErrorf("--full cannot be combined with --page-token/--page-size").WithParam("--full")
+	if runtime.Changed("page-token") && strings.TrimSpace(runtime.Str("page-token")) == "" {
+		return common.ValidationErrorf("--page-token cannot be empty").
+			WithParam("--page-token").
+			WithHint("omit --page-token for the default full read, or use --paginate to request the first page")
+	}
+	if runtime.Changed("full") && runtime.Changed("paginate") &&
+		runtime.Bool("full") == runtime.Bool("paginate") {
+		return common.ValidationErrorf("--full=%t conflicts with --paginate=%t", runtime.Bool("full"), runtime.Bool("paginate")).
+			WithParam("--paginate").
+			WithHint("choose one read mode: omit both flags for the default full read, or pass --paginate for pagination")
+	}
+	if runtime.Changed("full") && runtime.Bool("full") && fetchPaginationRequested(runtime) {
+		return common.ValidationErrorf("--full cannot be combined with --paginate/--page-token/--page-size").WithParam("--full")
 	}
 	if _, err := minutes.ParseIncludes(runtime.Str("include")); err != nil {
 		return err
@@ -79,25 +125,28 @@ func PlanFetchDryRun(_ context.Context, runtime *common.RuntimeContext) *common.
 			GET("/open-apis/wiki/v2/spaces/get_node").
 			Desc("[1] Resolve wiki node to underlying resource").
 			Params(map[string]interface{}{"token": in.token}).
-			Set("note", "dispatched by obj_type from step 1 (doc/docx/sheet/bitable/slides/file/minutes)")
+			Set("note", "dispatched by obj_type from step 1 (doc/docx/sheet/bitable/slides/file/minutes); non-Minutes targets use the requested read mode")
 		return dry.Set("embed_max_rows", runtime.Int("embed-max-rows"))
 	}
+	mode := resolveDriveFetchReadMode(runtime, in.inputType)
 
 	switch in.inputType {
 	case "doc", "docx":
 		body := contentread.NewRequest(fetchResourceURL(runtime.Config.Brand, in, in.inputType, in.token, false))
 		body.WithBlockID = true
-		contentread.ApplyPagination(&body, runtime.Bool("full"), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
+		contentread.ApplyPagination(&body, mode.full(), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
 		dry.POST(contentread.Path).
-			Desc("fetch document as paginated Markdown with block anchors").
+			Desc("fetch document as " + driveFetchReadModeDescription(mode) + " Markdown with block anchors").
 			Body(body)
-		dry.POST("/open-apis/docs_ai/v1/documents/<token>/fetch").
-			Desc("document API fallback (only if the first read path is unavailable)")
+		if mode == driveFetchReadModeFull {
+			dry.POST("/open-apis/docs_ai/v1/documents/<token>/fetch").
+				Desc("complete document API fallback (only if the first read path is unavailable)")
+		}
 	case "sheet", "bitable", "slides", "file":
 		body := contentread.NewRequest(fetchResourceURL(runtime.Config.Brand, in, in.inputType, in.token, false))
-		contentread.ApplyPagination(&body, runtime.Bool("full"), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
+		contentread.ApplyPagination(&body, mode.full(), strings.TrimSpace(runtime.Str("page-token")), runtime.Int("page-size"))
 		dry.POST(contentread.Path).
-			Desc(fmt.Sprintf("fetch %s as markdown (paginated)", in.inputType)).
+			Desc(fmt.Sprintf("fetch %s as markdown (%s)", in.inputType, driveFetchReadModeDescription(mode))).
 			Body(body)
 	case "minutes":
 		dry.GET(fmt.Sprintf("/open-apis/minutes/v1/minutes/%s", in.token)).
@@ -112,4 +161,11 @@ func PlanFetchDryRun(_ context.Context, runtime *common.RuntimeContext) *common.
 		}
 	}
 	return dry.Set("embed_max_rows", runtime.Int("embed-max-rows"))
+}
+
+func driveFetchReadModeDescription(mode driveFetchReadMode) string {
+	if mode == driveFetchReadModePaginated {
+		return "paginated"
+	}
+	return "complete"
 }

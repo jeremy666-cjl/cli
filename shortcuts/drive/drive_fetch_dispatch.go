@@ -20,6 +20,7 @@ import (
 func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in driveFetchInput, fetchType, fetchToken string, isWiki bool) (*driveFetchOutput, error) {
 	forwardURL := fetchResourceURL(runtime.Config.Brand, in, fetchType, fetchToken, isWiki)
 	maxRows := runtime.Int("embed-max-rows")
+	readMode := resolveDriveFetchReadMode(runtime, fetchType)
 
 	switch fetchType {
 	case "doc", "docx":
@@ -28,34 +29,40 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 		}
 		opts := contentread.FetchOptions{
 			MaxRows:   maxRows,
-			Full:      runtime.Bool("full"),
+			Full:      readMode.full(),
 			PageToken: strings.TrimSpace(runtime.Str("page-token")),
 			PageSize:  runtime.Int("page-size"),
 		}
 		result, ferr := contentread.FetchAnchoredMarkdown(ctx, runtime, forwardURL, opts)
 		if ferr != nil {
-			// A --page-token continuation must not fall back because the document
-			// API cannot honor a cursor.
-			if continuationErr := pageContinuationError(runtime, ferr); continuationErr != nil {
-				return nil, continuationErr
+			// The document API fallback always returns complete content, so it
+			// cannot honor any explicit paginated read mode.
+			if pageErr := paginatedReadError(runtime, fetchType, readMode, ferr); pageErr != nil {
+				return nil, pageErr
 			}
 			content, nerr := doc.FetchDocumentMarkdown(runtime, fetchToken)
 			if nerr != nil {
+				hint := "the complete Markdown read and document API fallback both failed; check read access for this document"
+				if !fetchAccessDenied(ferr) && !fetchAccessDenied(nerr) {
+					hint += "; retry with `--paginate` to request a bounded page"
+				}
 				return nil, withFetchErrorContext(nerr,
 					"doc fetch unavailable",
-					"the paginated Markdown read and document API fallback both failed; check read access for this document")
+					hint)
 			}
 			return &driveFetchOutput{
-				content: content,
+				content:        content,
+				spillOversized: readMode.full(),
 			}, nil
 		}
 		return &driveFetchOutput{
-			content:    result.Content,
-			title:      result.Title,
-			updateTime: result.UpdateTime,
-			hasMore:    result.HasMore,
-			nextToken:  result.NextPageToken,
-			warnings:   result.Hints,
+			content:        result.Content,
+			title:          result.Title,
+			updateTime:     result.UpdateTime,
+			hasMore:        result.HasMore,
+			nextToken:      result.NextPageToken,
+			warnings:       result.Hints,
+			spillOversized: readMode.full(),
 		}, nil
 
 	case "sheet", "bitable", "slides", "file":
@@ -67,23 +74,24 @@ func dispatchDriveFetch(ctx context.Context, runtime *common.RuntimeContext, in 
 		}
 		opts := contentread.FetchOptions{
 			MaxRows:   maxRows,
-			Full:      runtime.Bool("full"),
+			Full:      readMode.full(),
 			PageToken: strings.TrimSpace(runtime.Str("page-token")),
 			PageSize:  runtime.Int("page-size"),
 		}
 		res, ferr := contentread.FetchMarkdown(ctx, runtime, forwardURL, fetchType, opts)
 		if ferr != nil {
-			if continuationErr := pageContinuationError(runtime, ferr); continuationErr != nil {
-				return nil, continuationErr
+			if pageErr := paginatedReadError(runtime, fetchType, readMode, ferr); pageErr != nil {
+				return nil, pageErr
 			}
-			return nil, driveFetchUnavailable(fetchType, ferr)
+			return nil, driveFetchUnavailable(fetchType, ferr, readMode)
 		}
 		return &driveFetchOutput{
-			content:    res.Content,
-			title:      res.Title,
-			updateTime: res.UpdateTime,
-			hasMore:    res.HasMore,
-			nextToken:  res.NextPageToken,
+			content:        res.Content,
+			title:          res.Title,
+			updateTime:     res.UpdateTime,
+			hasMore:        res.HasMore,
+			nextToken:      res.NextPageToken,
+			spillOversized: readMode.full(),
 		}, nil
 
 	case "minutes":
@@ -162,18 +170,48 @@ func withFetchErrorContext(err error, label, hint string) error {
 		WithCause(err)
 }
 
-func pageContinuationError(runtime *common.RuntimeContext, cause error) error {
-	if !contentread.IsPageContinuation(runtime.Str("page-token")) {
+func paginatedReadError(runtime *common.RuntimeContext, fetchType string, readMode driveFetchReadMode, cause error) error {
+	if readMode != driveFetchReadModePaginated {
 		return nil
+	}
+	if fetchAccessDenied(cause) {
+		return withFetchErrorContext(cause,
+			fetchType+" not readable by this user",
+			"confirm you have read access to this resource, or ask its owner to share it (changing pagination cannot bypass the denial)")
+	}
+	if !contentread.IsPageContinuation(runtime.Str("page-token")) {
+		hint := "retry the paginated request, or omit pagination flags (including `--full=false`) to allow a complete read"
+		if !supportsBoundedFetchPagination(fetchType) {
+			hint = map[string]string{
+				"sheet":   "this resource may not support bounded Markdown pages; use `sheets +cells-get` for structured ranges, or omit pagination flags to allow a complete read",
+				"bitable": "this resource may not support bounded Markdown pages; use `base +record-list` for structured records, or omit pagination flags to allow a complete read",
+				"slides":  "this resource may not support bounded Markdown pages; omit pagination flags to allow a complete read",
+			}[fetchType]
+			if hint == "" {
+				hint = "retry later, or omit pagination flags to allow a complete read"
+			}
+		}
+		return withFetchErrorContext(cause,
+			"could not read the requested page",
+			hint)
 	}
 	return withFetchErrorContext(cause,
 		"could not read this page",
-		"the cursor may have expired because the resource changed; re-run without --page-token to read from the start")
+		"the cursor may have expired because the resource changed; re-run with `--paginate` and omit `--page-token` to read from the start")
+}
+
+func supportsBoundedFetchPagination(fetchType string) bool {
+	switch fetchType {
+	case "doc", "docx", "file", "wiki":
+		return true
+	default:
+		return false
+	}
 }
 
 // driveFetchUnavailable avoids suggesting a structured reader for access
 // denials because it would run as the same identity and fail the same way.
-func driveFetchUnavailable(fetchType string, cause error) error {
+func driveFetchUnavailable(fetchType string, cause error, readMode driveFetchReadMode) error {
 	if fetchAccessDenied(cause) {
 		return withFetchErrorContext(cause,
 			fetchType+" not readable by this user",
@@ -187,6 +225,9 @@ func driveFetchUnavailable(fetchType string, cause error) error {
 	}[fetchType]
 	if hint == "" {
 		hint = "retry later, or open the resource in Lark/Feishu"
+	}
+	if readMode == driveFetchReadModeFull && supportsBoundedFetchPagination(fetchType) {
+		hint = "retry with `--paginate` to request a bounded page; " + hint
 	}
 	return withFetchErrorContext(cause,
 		"fetch unavailable for "+fetchType,
@@ -222,6 +263,7 @@ func fetchWikiDirect(ctx context.Context, runtime *common.RuntimeContext, in dri
 		return nil, err
 	}
 	maxRows := runtime.Int("embed-max-rows")
+	readMode := resolveDriveFetchReadMode(runtime, "wiki")
 	// A bare wiki token (--type wiki --token X) has no rawURL; rebuild /wiki/<token>
 	// so the fetch service gets a real URL to unwrap server-side.
 	wikiURL := in.rawURL
@@ -230,22 +272,23 @@ func fetchWikiDirect(ctx context.Context, runtime *common.RuntimeContext, in dri
 	}
 	opts := contentread.FetchOptions{
 		MaxRows:   maxRows,
-		Full:      runtime.Bool("full"),
+		Full:      readMode.full(),
 		PageToken: strings.TrimSpace(runtime.Str("page-token")),
 		PageSize:  runtime.Int("page-size"),
 	}
 	res, ferr := contentread.FetchMarkdown(ctx, runtime, wikiURL, "wiki", opts)
 	if ferr != nil {
-		if continuationErr := pageContinuationError(runtime, ferr); continuationErr != nil {
-			return nil, continuationErr
+		if pageErr := paginatedReadError(runtime, "wiki", readMode, ferr); pageErr != nil {
+			return nil, pageErr
 		}
-		return nil, driveFetchUnavailable("wiki", ferr)
+		return nil, driveFetchUnavailable("wiki", ferr, readMode)
 	}
 	return &driveFetchOutput{
-		content:    res.Content,
-		title:      res.Title,
-		updateTime: res.UpdateTime,
-		hasMore:    res.HasMore,
-		nextToken:  res.NextPageToken,
+		content:        res.Content,
+		title:          res.Title,
+		updateTime:     res.UpdateTime,
+		hasMore:        res.HasMore,
+		nextToken:      res.NextPageToken,
+		spillOversized: readMode.full(),
 	}, nil
 }
