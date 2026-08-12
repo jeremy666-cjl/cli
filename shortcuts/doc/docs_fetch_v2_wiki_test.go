@@ -60,7 +60,7 @@ func TestPaginatedMarkdownContinuationFailureRecommendsExplicitRestart(t *testin
 	}
 }
 
-func TestDocsFetchWikiNativeFailureRedirectsToDrive(t *testing.T) {
+func TestDocsFetchWikiNativeFailureReportsResolvedTypeWithoutHint(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	const wikiURL = "https://example.feishu.cn/wiki/wikcnSheet?sheet=shtDetail#section"
@@ -82,7 +82,7 @@ func TestDocsFetchWikiNativeFailureRedirectsToDrive(t *testing.T) {
 		"--keyword", "owner",
 		"--as", "bot",
 	}, f, stdout)
-	assertWikiFetchDriveRedirect(t, err, "sheet", wikiURL)
+	assertWikiResolvedTypeError(t, err, "sheet")
 
 	var apiErr *errs.APIError
 	if !errors.As(errors.Unwrap(err), &apiErr) {
@@ -90,7 +90,7 @@ func TestDocsFetchWikiNativeFailureRedirectsToDrive(t *testing.T) {
 	}
 }
 
-func TestDocsFetchBareWikiTokenFailureRedirectsToDrive(t *testing.T) {
+func TestDocsFetchBareWikiTokenFailureReportsResolvedTypeWithoutHint(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	const wikiToken = "wikcnBareSheet"
@@ -110,18 +110,10 @@ func TestDocsFetchBareWikiTokenFailureRedirectsToDrive(t *testing.T) {
 		"--doc", wikiToken,
 		"--as", "bot",
 	}, f, stdout)
-	assertValidationContract(t, err, errs.SubtypeFailedPrecondition, "--doc")
-	var validationErr *errs.ValidationError
-	if !errors.As(err, &validationErr) {
-		t.Fatalf("error type = %T, want *errs.ValidationError", err)
-	}
-	want := "lark-cli drive +fetch --token '" + wikiToken + "' --type wiki"
-	if !strings.Contains(validationErr.Hint, want) {
-		t.Fatalf("hint %q missing executable bare-Wiki fallback %q", validationErr.Hint, want)
-	}
+	assertWikiResolvedTypeError(t, err, "sheet")
 }
 
-func TestDocsFetchMindnoteWikiUsesMindnoteFallback(t *testing.T) {
+func TestDocsFetchMindnoteWikiReportsResolvedTypeWithoutHint(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	const wikiURL = "https://example.feishu.cn/wiki/wikcnMindnote"
@@ -141,20 +133,10 @@ func TestDocsFetchMindnoteWikiUsesMindnoteFallback(t *testing.T) {
 		"--doc", wikiURL,
 		"--as", "bot",
 	}, f, stdout)
-	assertValidationContract(t, err, errs.SubtypeFailedPrecondition, "--doc")
-	var validationErr *errs.ValidationError
-	if !errors.As(err, &validationErr) {
-		t.Fatalf("error type = %T, want *errs.ValidationError", err)
-	}
-	if !strings.Contains(validationErr.Hint, "lark-cli mindnotes nodes list --mindnote-id 'mndBacking'") {
-		t.Fatalf("hint %q missing Mindnote reader", validationErr.Hint)
-	}
-	if strings.Contains(validationErr.Hint, "drive +fetch") {
-		t.Fatalf("hint %q must not route unsupported Mindnote content to drive +fetch", validationErr.Hint)
-	}
+	assertWikiResolvedTypeError(t, err, "mindnote")
 }
 
-func TestDocsFetchWikiAnchoredReadFailureRedirectsBeforeFallback(t *testing.T) {
+func TestDocsFetchWikiAnchoredReadFailureReportsTypeBeforeFallback(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	const wikiURL = "https://example.feishu.cn/wiki/wikcnBase?table=tblDetail&view=vewMain"
@@ -190,7 +172,7 @@ func TestDocsFetchWikiAnchoredReadFailureRedirectsBeforeFallback(t *testing.T) {
 		"--page-token", "page-2",
 		"--as", "bot",
 	}, f, stdout)
-	assertWikiFetchDriveRedirect(t, err, "bitable", wikiURL)
+	assertWikiResolvedTypeError(t, err, "bitable")
 
 	if got := len(fallbackStub.CapturedBodies); got != 0 {
 		t.Fatalf("document API fallback calls = %d, want 0 after non-Doc Wiki diagnosis", got)
@@ -279,7 +261,7 @@ func TestDocsFetchWikiTypeProbeIsCachedAcrossFallback(t *testing.T) {
 	}
 }
 
-func TestDocsFetchBareWikiTokenReusesResolutionForRedirect(t *testing.T) {
+func TestDocsFetchBareWikiTokenReusesResolutionForTypeError(t *testing.T) {
 	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
 
 	const wikiToken = "wikcnBareBase"
@@ -303,14 +285,9 @@ func TestDocsFetchBareWikiTokenReusesResolutionForRedirect(t *testing.T) {
 		"--doc-format", "markdown",
 		"--as", "bot",
 	}, f, stdout)
-	assertValidationContract(t, err, errs.SubtypeFailedPrecondition, "--doc")
+	assertWikiResolvedTypeError(t, err, "bitable")
 	if got := len(wikiStub.CapturedBodies); got != 1 {
-		t.Fatalf("wiki get_node calls = %d, want exactly 1 across URL resolution and type redirect", got)
-	}
-	var validationErr *errs.ValidationError
-	if !errors.As(err, &validationErr) || !strings.Contains(validationErr.Hint,
-		"lark-cli drive +fetch --token '"+wikiToken+"' --type wiki") {
-		t.Fatalf("error = %#v, want executable drive +fetch redirect", err)
+		t.Fatalf("wiki get_node calls = %d, want exactly 1 across URL resolution and type diagnosis", got)
 	}
 }
 
@@ -418,16 +395,6 @@ func TestShouldDiagnoseWikiFetchTypePreservesTypedInfrastructureErrors(t *testin
 	}
 }
 
-func TestShellQuoteFetchURL(t *testing.T) {
-	t.Parallel()
-
-	const input = "https://example.feishu.cn/wiki/wikcnX?query=a'b&literal=$HOME"
-	const want = `'https://example.feishu.cn/wiki/wikcnX?query=a'"'"'b&literal=$HOME'`
-	if got := shellQuoteFetchURL(input); got != want {
-		t.Fatalf("shellQuoteFetchURL() = %q, want %q", got, want)
-	}
-}
-
 func wikiNodeStub(objType, objToken string) *httpmock.Stub {
 	return &httpmock.Stub{
 		Method: "GET",
@@ -446,7 +413,7 @@ func wikiNodeStub(objType, objToken string) *httpmock.Stub {
 	}
 }
 
-func assertWikiFetchDriveRedirect(t *testing.T, err error, objType, wikiURL string) {
+func assertWikiResolvedTypeError(t *testing.T, err error, objType string) {
 	t.Helper()
 
 	assertValidationContract(t, err, errs.SubtypeFailedPrecondition, "--doc")
@@ -454,16 +421,11 @@ func assertWikiFetchDriveRedirect(t *testing.T, err error, objType, wikiURL stri
 	if !errors.As(err, &validationErr) {
 		t.Fatalf("error type = %T, want *errs.ValidationError", err)
 	}
-	if !strings.Contains(validationErr.Message, objType) {
-		t.Fatalf("message %q does not include actual Wiki type %q", validationErr.Message, objType)
+	wantMessage := fmt.Sprintf("Unsupported document type '%s'. Only docx is supported.", objType)
+	if validationErr.Message != wantMessage {
+		t.Fatalf("message = %q, want %q", validationErr.Message, wantMessage)
 	}
-	for _, want := range []string{
-		"lark-cli drive +fetch --url",
-		shellQuoteFetchURL(wikiURL),
-		"do not retry `docs +fetch`",
-	} {
-		if !strings.Contains(validationErr.Hint, want) {
-			t.Fatalf("hint %q missing %q", validationErr.Hint, want)
-		}
+	if validationErr.Hint != "" {
+		t.Fatalf("hint = %q, want empty so the caller routes by resolved type", validationErr.Hint)
 	}
 }

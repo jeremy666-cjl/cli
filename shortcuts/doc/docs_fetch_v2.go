@@ -250,10 +250,8 @@ func executeFetchV2(ctx context.Context, runtime *common.RuntimeContext) error {
 // followed by a fallback failure never probes the same node twice.
 func newWikiFetchTypeGuard(runtime *common.RuntimeContext, ref documentRef, checked bool, resolvedNode *common.WikiNode) func(error) error {
 	actualType := ""
-	actualToken := ""
 	if resolvedNode != nil {
 		actualType = strings.TrimSpace(resolvedNode.ObjType)
-		actualToken = strings.TrimSpace(resolvedNode.ObjToken)
 	}
 
 	return func(cause error) error {
@@ -275,7 +273,6 @@ func newWikiFetchTypeGuard(runtime *common.RuntimeContext, ref documentRef, chec
 				return nil //nolint:nilerr // Retain the original fetch failure when the optional Wiki probe fails.
 			}
 			actualType = strings.TrimSpace(node.ObjType)
-			actualToken = strings.TrimSpace(node.ObjToken)
 		}
 
 		switch strings.ToLower(actualType) {
@@ -284,34 +281,12 @@ func newWikiFetchTypeGuard(runtime *common.RuntimeContext, ref documentRef, chec
 		}
 
 		redirectErr := errs.NewValidationError(errs.SubtypeFailedPrecondition,
-			"Wiki input resolves to %q, but docs +fetch only supports doc/docx content", actualType).
-			WithParam("--doc").
-			WithHint("%s; do not retry `docs +fetch` for this Wiki resource",
-				wikiFetchFallbackHint(input, ref, actualType, actualToken))
+			"Unsupported document type '%s'. Only docx is supported.", actualType).
+			WithParam("--doc")
 		if cause != nil {
 			redirectErr.WithCause(cause)
 		}
 		return redirectErr
-	}
-}
-
-// wikiFetchFallbackHint routes only types drive +fetch actually supports there.
-// Mindnote has its own content API; unknown future types get an inspect command
-// instead of a remediation that is guaranteed to fail.
-func wikiFetchFallbackHint(input string, ref documentRef, actualType, actualToken string) string {
-	switch strings.ToLower(actualType) {
-	case "sheet", "sheets", "base", "bitable", "slides", "file", "minutes":
-		if ref.Kind == "wiki" && strings.Contains(input, "://") {
-			return fmt.Sprintf("run once: `lark-cli drive +fetch --url %s`", shellQuoteFetchURL(input))
-		}
-		return fmt.Sprintf("run once: `lark-cli drive +fetch --token %s --type wiki`", shellQuoteFetchURL(ref.Token))
-	case "mindnote":
-		return fmt.Sprintf("run: `lark-cli mindnotes nodes list --mindnote-id %s`", shellQuoteFetchURL(actualToken))
-	default:
-		if ref.Kind == "wiki" && strings.Contains(input, "://") {
-			return fmt.Sprintf("inspect the resource with `lark-cli drive +inspect --url %s` and use its entity-specific reader", shellQuoteFetchURL(input))
-		}
-		return fmt.Sprintf("inspect the resource with `lark-cli drive +inspect --url %s --type wiki` and use its entity-specific reader", shellQuoteFetchURL(ref.Token))
 	}
 }
 
@@ -328,12 +303,6 @@ func shouldDiagnoseWikiFetchType(cause error) bool {
 	}
 	problem, ok := errs.ProblemOf(cause)
 	return ok && problem.Subtype == errs.SubtypeInvalidResponse
-}
-
-// shellQuoteFetchURL returns a POSIX-shell-safe single argument. The hint is
-// intentionally executable and preserves Wiki query/fragment selectors.
-func shellQuoteFetchURL(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func buildFetchBody(runtime *common.RuntimeContext) map[string]interface{} {
