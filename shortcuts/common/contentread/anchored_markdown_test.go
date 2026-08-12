@@ -103,6 +103,79 @@ func TestRenderAnchoredMarkdown_List(t *testing.T) {
 	}
 }
 
+func TestRenderAnchoredMarkdown_NestedListsPreserveDepth(t *testing.T) {
+	t.Parallel()
+	xml := `<ul>` +
+		`<li>第一个无序列表项</li>` +
+		`<li>第二个无序列表项<ul>` +
+		`<li>二级子项 A</li>` +
+		`<li>二级子项 B<ul><li>三级子项 1</li><li>三级子项 2</li></ul></li>` +
+		`</ul></li>` +
+		`<li>第三个无序列表项</li>` +
+		`</ul>` +
+		`<ol><li>第一个有序列表项</li><li>第二个有序列表项` +
+		`<ol><li>二级有序子项</li><li>另一个二级子项</li></ol>` +
+		`</li><li>第三个有序列表项</li></ol>`
+
+	got := mustRenderAnchoredMarkdown(t, xml, nil, 0)
+	for _, want := range []string{
+		"- 第一个无序列表项\n",
+		"- 第二个无序列表项\n    - 二级子项 A\n    - 二级子项 B\n        - 三级子项 1\n        - 三级子项 2\n",
+		"- 第三个无序列表项\n",
+		"1. 第一个有序列表项\n",
+		"2. 第二个有序列表项\n    1. 二级有序子项\n    2. 另一个二级子项\n",
+		"3. 第三个有序列表项\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing nested list structure %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAnchoredMarkdown_ServiceSiblingListsPreserveDepth(t *testing.T) {
+	t.Parallel()
+	// fetch_doc_info emits a child list after its parent item, as a sibling
+	// within the outer list, instead of nesting it inside the parent <li>.
+	xml := `<ul>` +
+		`<li>第一个无序列表项</li>` +
+		`<li>第二个无序列表项</li>` +
+		`<ul><li>二级子项 A</li><li>二级子项 B</li>` +
+		`<ul><li>三级子项 1</li><li>三级子项 2</li></ul></ul>` +
+		`<li>第三个无序列表项</li>` +
+		`</ul>` +
+		`<ol><li>第一个有序列表项</li><li>第二个有序列表项</li>` +
+		`<ol><li>二级有序子项</li><li>另一个二级子项</li></ol>` +
+		`<li>第三个有序列表项</li></ol>`
+
+	got := mustRenderAnchoredMarkdown(t, xml, nil, 0)
+	for _, want := range []string{
+		"- 第二个无序列表项\n    - 二级子项 A\n    - 二级子项 B\n        - 三级子项 1\n        - 三级子项 2\n- 第三个无序列表项\n",
+		"2. 第二个有序列表项\n    1. 二级有序子项\n    2. 另一个二级子项\n3. 第三个有序列表项\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing service-shaped nested list %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAnchoredMarkdown_CheckboxPreservesState(t *testing.T) {
+	t.Parallel()
+	xml := `<checkbox id="todo" done="false">未完成的任务</checkbox>` +
+		`<checkbox id="done" done="true">已完成的任务</checkbox>` +
+		`<checkbox done="false">待办事项中可以包含**富文本**格式</checkbox>`
+
+	got := mustRenderAnchoredMarkdown(t, xml, nil, 0)
+	for _, want := range []string{
+		"- [ ] 未完成的任务",
+		"- [x] 已完成的任务",
+		"- [ ] 待办事项中可以包含**富文本**格式",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing checkbox %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderAnchoredMarkdown_Code(t *testing.T) {
 	t.Parallel()
 	xml := `<pre id="c" lang="go"><code>fmt.Println("hi")</code></pre>`

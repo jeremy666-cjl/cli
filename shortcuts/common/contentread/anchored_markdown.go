@@ -132,6 +132,8 @@ func (r *anchoredMarkdownRenderer) renderBlock(dec *xml.Decoder, start xml.Start
 		return nil
 	case name == "ul" || name == "ol":
 		return r.renderList(dec, start)
+	case name == "checkbox":
+		return r.renderCheckbox(dec, start)
 	case name == "pre":
 		return r.renderCode(dec, start)
 	case name == "img":
@@ -149,6 +151,14 @@ func (r *anchoredMarkdownRenderer) renderBlock(dec *xml.Decoder, start xml.Start
 }
 
 func (r *anchoredMarkdownRenderer) renderList(dec *xml.Decoder, start xml.StartElement) error {
+	if err := r.renderListAtDepth(dec, start, 0); err != nil {
+		return err
+	}
+	r.out.WriteString("\n")
+	return nil
+}
+
+func (r *anchoredMarkdownRenderer) renderListAtDepth(dec *xml.Decoder, start xml.StartElement, depth int) error {
 	ordered := start.Name.Local == "ol"
 	n := 0
 	for {
@@ -161,20 +171,19 @@ func (r *anchoredMarkdownRenderer) renderList(dec *xml.Decoder, start xml.StartE
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Local == "li" {
-				txt, err := r.readText(dec, "li")
-				if err != nil {
+			switch t.Name.Local {
+			case "li":
+				n++
+				if err := r.renderListItem(dec, t, ordered, n, depth); err != nil {
 					return err
 				}
-				if txt = normalizeInline(txt); txt != "" {
-					n++
-					marker := "- "
-					if ordered {
-						marker = strconv.Itoa(n) + ". "
-					}
-					r.out.WriteString(marker + txt + "\n")
+			case "ul", "ol":
+				// Content-read emits nested lists after their parent item rather than
+				// inside its <li>. Preserve that service shape as one deeper level.
+				if err := r.renderListAtDepth(dec, t, depth+1); err != nil {
+					return err
 				}
-			} else {
+			default:
 				// Content-read may interleave embedded blocks between list items.
 				r.out.WriteString("\n")
 				if err := r.renderBlock(dec, t); err != nil {
@@ -183,11 +192,79 @@ func (r *anchoredMarkdownRenderer) renderList(dec *xml.Decoder, start xml.StartE
 			}
 		case xml.EndElement:
 			if t.Name.Local == start.Name.Local {
-				r.out.WriteString("\n")
 				return nil
 			}
 		}
 	}
+}
+
+func (r *anchoredMarkdownRenderer) renderListItem(dec *xml.Decoder, start xml.StartElement, ordered bool, index, depth int) error {
+	var text strings.Builder
+	wroteLine := false
+	writeText := func() {
+		body := normalizeInline(text.String())
+		text.Reset()
+		if body == "" {
+			return
+		}
+
+		indent := strings.Repeat("    ", depth)
+		marker := "- "
+		if ordered {
+			marker = strconv.Itoa(index) + ". "
+		}
+		if wroteLine {
+			marker = strings.Repeat(" ", len(marker))
+		}
+		r.out.WriteString(indent + marker + body + "\n")
+		wroteLine = true
+	}
+
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			text.Write(t)
+		case xml.StartElement:
+			if t.Name.Local == "ul" || t.Name.Local == "ol" {
+				writeText()
+				if err := r.renderListAtDepth(dec, t, depth+1); err != nil {
+					return err
+				}
+				continue
+			}
+			inner, err := r.readText(dec, t.Name.Local)
+			if err != nil {
+				return err
+			}
+			text.WriteString(inner)
+		case xml.EndElement:
+			if t.Name.Local == start.Name.Local {
+				writeText()
+				return nil
+			}
+		}
+	}
+}
+
+func (r *anchoredMarkdownRenderer) renderCheckbox(dec *xml.Decoder, start xml.StartElement) error {
+	text, err := r.readText(dec, start.Name.Local)
+	if err != nil {
+		return err
+	}
+	text = normalizeInline(text)
+	if text == "" {
+		return nil
+	}
+	marker := "- [ ] "
+	if strings.EqualFold(strings.TrimSpace(attrOf(start, "done")), "true") {
+		marker = "- [x] "
+	}
+	r.out.WriteString(marker + text + "\n\n")
+	return nil
 }
 
 func (r *anchoredMarkdownRenderer) renderCode(dec *xml.Decoder, start xml.StartElement) error {
