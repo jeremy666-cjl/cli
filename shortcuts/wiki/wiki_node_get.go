@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/larksuite/cli/errs"
+	"github.com/larksuite/cli/internal/citation"
+	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/spf13/cobra"
 )
@@ -122,6 +124,10 @@ var WikiNodeGet = common.Shortcut{
 			renderWikiNodeGetPretty(w, out)
 		})
 		return nil
+	},
+	Citation: &common.CitationDefinition{
+		SourceTypes: []citation.SourceType{citation.SourceWiki},
+		Build:       wikiNodeGetCitations,
 	},
 }
 
@@ -314,6 +320,51 @@ func wikiNodeGetOutput(node *wikiNodeRecord, raw map[string]interface{}) map[str
 	out["updated_at"] = formatWikiTimestamp(objEditRaw)
 
 	return out
+}
+
+// wikiNodeCitation builds the node's citation entry for the envelope-level
+// citations array. The URL uses the brand's applink deep link
+// (applink.<brand>/client/wiki/open?wikiToken=<token>), not the
+// www.feishu.cn/wiki/<token> web link that wikiNodeGetOutput's doc comment
+// above deliberately omits from `data`: that web form is a non-canonical
+// redirect and would mislead in a read/confirm command's structured output.
+// The applink form doesn't carry that problem — it is the documented
+// client-side deep-link contract, gated behind LARKSUITE_CLI_CITATION (off by
+// default) and surfaced only in the top-level citations array, never in
+// `data`. So the two decisions coexist: `data` still emits no url; citations
+// may carry an applink url. An empty nodeToken yields an empty URL and the
+// framework drops the entry (citation.Normalize).
+func wikiNodeCitation(brand core.LarkBrand, spaceID, nodeToken, title, objEditTime string) []citation.Citation {
+	entry := citation.Citation{
+		SourceType:  citation.SourceWiki,
+		Title:       title,
+		PublishTime: citation.Time(objEditTime),
+	}
+	if nodeToken != "" {
+		entry.URL = core.ResolveEndpoints(brand).AppLink + "/client/wiki/open?wikiToken=" + url.QueryEscape(nodeToken)
+		if spaceID != "" {
+			entry.ResourceID = spaceID + "/" + nodeToken
+		}
+	}
+	return []citation.Citation{entry}
+}
+
+// wikiNodeGetCitations adapts the final output payload to the node's citation
+// entry. It returns nil on any unexpected shape instead of failing the command.
+func wikiNodeGetCitations(rt *common.RuntimeContext, data any) []citation.Citation {
+	out, ok := data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	brand := core.BrandFeishu
+	if rt != nil && rt.Config != nil {
+		brand = rt.Config.Brand
+	}
+	spaceID, _ := out["space_id"].(string)
+	nodeToken, _ := out["node_token"].(string)
+	title, _ := out["title"].(string)
+	objEditTime, _ := out["obj_edit_time"].(string)
+	return wikiNodeCitation(brand, spaceID, nodeToken, title, objEditTime)
 }
 
 // formatWikiTimestamp turns a Lark unix-seconds string (the format used by
