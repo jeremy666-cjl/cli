@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/larksuite/cli/errs"
 	"github.com/larksuite/cli/internal/citation"
-	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 	convertlib "github.com/larksuite/cli/shortcuts/im/convert_lib"
@@ -230,6 +228,11 @@ var ImChatMessageList = common.Shortcut{
 		})
 		return nil
 	},
+	// Citation declares this command's citation capability. SourceTypes is the
+	// whitelist the framework enforces at runtime: an entry Build returns with
+	// any other scene is dropped with a stderr warning. Declaring it is only
+	// legal because Risk is "read" — mountDeclarative panics otherwise. See
+	// im_citation.go for how the framework reaches Build.
 	Citation: &common.CitationDefinition{
 		SourceTypes: []citation.SourceType{citation.SourceMessage},
 		Build:       chatMessagesListCitations,
@@ -307,64 +310,32 @@ func resolveChatIDForMessagesList(runtime *common.RuntimeContext, dryRun bool) (
 	return chatId, nil
 }
 
-// chatMessageCitation builds one message's citation. The URL opens the chat
-// via the brand's applink endpoint; title is a 50-rune excerpt of the text.
-func chatMessageCitation(brand core.LarkBrand, chatID, messageID, text, createTime string) citation.Citation {
-	entry := citation.Citation{
-		SourceType:  citation.SourceMessage,
-		Snippet:     text,
-		Title:       truncateRunes(text, 50),
-		PublishTime: citation.Time(createTime),
-	}
-	if chatID != "" {
-		entry.URL = core.ResolveEndpoints(brand).AppLink + "/client/chat/open?openChatId=" + url.QueryEscape(chatID)
-		if messageID != "" {
-			entry.ResourceID = chatID + "/" + messageID
-		}
-	}
-	return entry
-}
-
-func truncateRunes(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max]) + "…"
-}
-
-// chatMessagesListCitations adapts the final output payload to per-message
-// citations. It tolerates both concrete and interface slice shapes and
-// returns nil on any unexpected shape instead of failing the command.
+// chatMessagesListCitations turns this command's output payload into one
+// citation per citable message.
+//
+// `data` is the exact map Execute passed to runtime.OutFormat — the builder
+// runs after Execute has finished, on the finished payload. That is also why
+// chat_id is in the payload at all: every message here belongs to the one chat
+// this command resolved (from --chat-id, or from --user-id via a P2P lookup),
+// so the payload exposes it once at the top level and the per-message entries
+// may omit it. Passing it as the fallback keeps the URL complete either way.
+//
+// Non-text messages are skipped this round, so len(citations) is normally
+// smaller than len(messages).
 func chatMessagesListCitations(rt *common.RuntimeContext, data any) []citation.Citation {
-	out, ok := data.(map[string]interface{})
-	if !ok {
+	items := citationItems(data, "messages")
+	if items == nil {
 		return nil
 	}
+	out, _ := data.(map[string]interface{})
 	chatID, _ := out["chat_id"].(string)
-	brand := core.BrandFeishu
-	if rt != nil && rt.Config != nil {
-		brand = rt.Config.Brand
-	}
-	var items []map[string]interface{}
-	switch v := out["messages"].(type) {
-	case []map[string]interface{}:
-		items = v
-	case []interface{}:
-		for _, entry := range v {
-			if m, ok := entry.(map[string]interface{}); ok {
-				items = append(items, m)
-			}
-		}
-	default:
-		return nil
-	}
+	brand := citationBrand(rt)
+
 	citations := make([]citation.Citation, 0, len(items))
 	for _, msg := range items {
-		messageID, _ := msg["message_id"].(string)
-		text, _ := msg["content"].(string)
-		createTime, _ := msg["create_time"].(string)
-		citations = append(citations, chatMessageCitation(brand, chatID, messageID, text, createTime))
+		if entry, ok := messageCitation(brand, msg, chatID); ok {
+			citations = append(citations, entry)
+		}
 	}
 	return citations
 }
