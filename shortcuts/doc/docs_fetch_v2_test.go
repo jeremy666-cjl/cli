@@ -572,7 +572,7 @@ func TestAddFetchDetailDowngradeWarningNoops(t *testing.T) {
 }
 
 func TestBuildFetchBodyIncludesFetchExtraParamByDefault(t *testing.T) {
-	t.Setenv(envvars.CliCitation, "")
+	t.Setenv(envvars.CliCitation, "0")
 
 	runtime := newFetchBodyTestRuntime(context.Background())
 
