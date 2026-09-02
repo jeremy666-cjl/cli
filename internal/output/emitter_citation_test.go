@@ -123,3 +123,26 @@ func TestPartialFailureEnvelopeInjectsCitations(t *testing.T) {
 		t.Fatalf("partial failure envelope missing citations: %s", out.String())
 	}
 }
+
+func TestEmitEnvelopeWithCitationsSkipsHTMLEscaping(t *testing.T) {
+	var out, errOut bytes.Buffer
+	e := citationTestEmitter(&out, &errOut)
+	err := e.Success(map[string]any{"k": "<b>A&B</b>"}, EmitOptions{Citations: func() []citation.Citation { return sampleCitations() }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `<document reference_id=`) || strings.Contains(out.String(), `\u003c`) {
+		t.Fatalf("envelope with citations must carry raw XML bytes: %s", out.String())
+	}
+}
+
+func TestEmitEnvelopeWithoutCitationsKeepsHTMLEscaping(t *testing.T) {
+	var out, errOut bytes.Buffer
+	e := citationTestEmitter(&out, &errOut)
+	if err := e.Success(map[string]any{"k": "<b>A&B</b>"}, EmitOptions{Citations: func() []citation.Citation { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `\u003cb\u003eA\u0026B\u003c/b\u003e`) {
+		t.Fatalf("envelope without citations must keep default HTML escaping: %s", out.String())
+	}
+}

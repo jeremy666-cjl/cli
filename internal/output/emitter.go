@@ -244,7 +244,10 @@ func (e *Emitter) emitEnvelope(data interface{}, ok bool, opts EmitOptions) erro
 	}
 
 	return e.emit(func(w io.Writer) error {
-		if opts.Raw {
+		// Citations are XML <document> strings consumed as raw bytes without a
+		// JSON decode, so an envelope carrying them must not HTML-escape <, >
+		// and &. Envelopes without citations keep the default escaping policy.
+		if opts.Raw || len(env.Citations) > 0 {
 			enc := json.NewEncoder(w)
 			enc.SetEscapeHTML(false)
 			enc.SetIndent("", "  ")
