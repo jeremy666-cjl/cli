@@ -20,6 +20,7 @@ type HostDefinition struct {
 	NewArgs    func() any
 	Hooks      HostHooks
 	PageOutput bool
+	Citation   *CitationDefinition[any]
 }
 
 // HostHooks is the erased hook set consumed by lark-cli's host adapter.
@@ -62,6 +63,7 @@ type hostDefinition struct {
 	newArgs    func() any
 	hooks      HostHooks
 	pageOutput bool
+	citation   *CitationDefinition[any]
 }
 
 func newCommand[Args any, Data any](definition Definition[Args, Data]) Command {
@@ -73,6 +75,7 @@ func newCommand[Args any, Data any](definition Definition[Args, Data]) Command {
 		dataType:   reflect.TypeFor[Data](),
 		newArgs:    func() any { return new(Args) },
 		hooks:      bindHooks(definition.Hooks),
+		citation:   bindCitation(definition.Citation),
 		pageOutput: reflect.TypeFor[Data]().Implements(reflect.TypeFor[interface{ commandPagination() *paginationMeta }]()),
 	}}
 }
@@ -174,6 +177,7 @@ func InspectCommand(command Command) HostDefinition {
 		NewArgs:    definition.newArgs,
 		Hooks:      cloneHostHooks(definition.hooks),
 		PageOutput: definition.pageOutput,
+		Citation:   cloneHostCitation(definition.citation),
 	}
 }
 

@@ -118,7 +118,7 @@ func TestWikiNodeGetMountedExecuteEmitsCitation(t *testing.T) {
 	factory, stdout, _, registry := cmdutil.TestFactory(t, wikiTestConfig())
 	registry.Register(&httpmock.Stub{
 		Method: "GET",
-		URL:    "/open-apis/wiki/v2/spaces/get_node",
+		URL:    "/open-apis/wiki/v2/spaces/node_by_token",
 		Body: map[string]interface{}{
 			"code": 0,
 			"data": map[string]interface{}{
@@ -216,7 +216,7 @@ func TestWikiNodeGetPrettyDoesNotFetchCitationURL(t *testing.T) {
 	factory, stdout, _, registry := cmdutil.TestFactory(t, wikiTestConfig())
 	registry.Register(&httpmock.Stub{
 		Method: "GET",
-		URL:    "/open-apis/wiki/v2/spaces/get_node",
+		URL:    "/open-apis/wiki/v2/spaces/node_by_token",
 		Body: map[string]interface{}{
 			"code": 0,
 			"data": map[string]interface{}{
@@ -262,7 +262,7 @@ func TestWikiNodeGetCitationLookupFailureDoesNotFailCommand(t *testing.T) {
 	factory, stdout, stderr, registry := cmdutil.TestFactory(t, wikiTestConfig())
 	registry.Register(&httpmock.Stub{
 		Method: "GET",
-		URL:    "/open-apis/wiki/v2/spaces/get_node",
+		URL:    "/open-apis/wiki/v2/spaces/node_by_token",
 		Body: map[string]interface{}{
 			"code": 0,
 			"data": map[string]interface{}{

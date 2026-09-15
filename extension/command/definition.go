@@ -25,6 +25,7 @@ type Definition[Args any, Data any] struct {
 	Input    InputDefinition
 	Output   OutputDefinition
 	Hooks    Hooks[Args, Data]
+	Citation *CitationDefinition[Data]
 }
 
 // CommandMetadata describes the command name, help, risk, and authorization.

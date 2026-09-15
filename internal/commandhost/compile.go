@@ -123,6 +123,7 @@ func compileCommand(definition command.HostDefinition) (common.Shortcut, error) 
 		DataType:   definition.DataType,
 		Hooks:      hooks,
 		PageOutput: definition.PageOutput,
+		Citation:   definition.Citation,
 	}, commandbridge.Access{})
 }
 
@@ -210,8 +211,9 @@ func (c *commandPages) AddPage(page map[string]any) error {
 
 func publicContext(host commandbridge.RuntimeContext) command.CommandContext {
 	return command.NewCommandContext(command.ContextOptions{
-		Identity: host.Identity(),
-		DryRun:   host.IsDryRun(),
+		Identity:         host.Identity(),
+		DryRun:           host.IsDryRun(),
+		CitationsEnabled: host.CitationsEnabled(),
 		CallJSON: func(ctx context.Context, request command.Request) (map[string]any, error) {
 			view := command.InspectRequest(request)
 			return common.DoHostedAPIJSON(ctx, host, view.Method, view.Path, queryParams(view.Query), view.Body, commandbridge.Access{})

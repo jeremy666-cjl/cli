@@ -54,10 +54,8 @@ type EmitOptions struct {
 	JQSafetyWarning bool
 
 	// Citations lazily builds the envelope citations. emitEnvelope invokes it
-	// only after the format dispatch has committed to an envelope; nil means
-	// this result carries no citations. Laziness matters: only the emitter
-	// knows which branch really produces an envelope (jq precedence, pretty
-	// fallback, unknown-format fallback), so callers must not pre-judge.
+	// only after dispatch selects an envelope and safety scanning passes.
+	// UsesEnvelope lets callers prepare metadata, but does not guarantee emission.
 	Citations func() []citation.Citation
 }
 
@@ -100,6 +98,20 @@ func NewEmitter(config EmitterConfig) *Emitter {
 		colorEnabled:   config.ColorEnabled,
 		noticeProvider: config.NoticeProvider,
 	}
+}
+
+// UsesEnvelope reports whether success output is eligible for an envelope.
+// Safety scanning may still block emission. Pretty without a renderer retains
+// its own scanning and warning path before falling back to the envelope.
+func UsesEnvelope(format, jq string, hasPrettyRenderer bool) bool {
+	if jq != "" {
+		return true
+	}
+	if format == "pretty" {
+		return !hasPrettyRenderer
+	}
+	parsed, _ := ParseFormat(format)
+	return parsed == FormatJSON
 }
 
 // Success scans and emits one command result by composing the package's leaf
